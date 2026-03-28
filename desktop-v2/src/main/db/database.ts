@@ -20,11 +20,11 @@ export function saveDb(): void {
 }
 
 export async function initDatabase(): Promise<void> {
-  // In dev: __dirname = <project>/dist/main, project root = __dirname/../../
-  // In prod: __dirname = <install>/resources/app/dist/main
+  // In dev: __dirname = <project>/dist/main/db, project root = __dirname/../../../
+  // In prod: __dirname = <install>/resources/app/dist/main/db
   const projectRoot = app.isPackaged
     ? path.join(process.resourcesPath, 'app')
-    : path.resolve(__dirname, '..', '..');
+    : path.resolve(__dirname, '..', '..', '..');
 
   const userDataPath = app.isPackaged ? app.getPath('userData') : projectRoot;
   _dbPath = path.join(userDataPath, 'controlid-dm.db');
