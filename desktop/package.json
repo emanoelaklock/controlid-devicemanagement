@@ -1,0 +1,94 @@
+{
+  "name": "controlid-device-manager",
+  "version": "1.0.0",
+  "description": "Control iD Device Manager - Desktop Application",
+  "main": "dist/main.js",
+  "author": "Control iD",
+  "license": "MIT",
+  "scripts": {
+    "build:backend": "tsc",
+    "build:frontend": "cd ../frontend && npm install && npm run build",
+    "prisma:generate": "prisma generate",
+    "prisma:migrate": "prisma migrate deploy",
+    "prebuild": "npm run prisma:generate && npm run build:backend && npm run build:frontend",
+    "start": "electron .",
+    "dev": "tsc && electron .",
+    "dist": "npm run prebuild && electron-builder --win",
+    "dist:linux": "npm run prebuild && electron-builder --linux",
+    "dist:mac": "npm run prebuild && electron-builder --mac"
+  },
+  "dependencies": {
+    "@prisma/client": "^5.20.0",
+    "bcryptjs": "^2.4.3",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.5",
+    "express": "^4.21.0",
+    "express-rate-limit": "^7.4.0",
+    "helmet": "^7.1.0",
+    "jsonwebtoken": "^9.0.2",
+    "node-cron": "^3.0.3",
+    "winston": "^3.14.2",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@types/bcryptjs": "^2.4.6",
+    "@types/cors": "^2.8.17",
+    "@types/express": "^4.17.21",
+    "@types/jsonwebtoken": "^9.0.7",
+    "@types/node": "^22.7.0",
+    "@types/node-cron": "^3.0.11",
+    "electron": "^32.1.0",
+    "electron-builder": "^25.0.5",
+    "prisma": "^5.20.0",
+    "typescript": "^5.6.2"
+  },
+  "build": {
+    "appId": "com.controlid.devicemanager",
+    "productName": "Control iD Device Manager",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**/*",
+      "prisma/**/*",
+      "node_modules/**/*",
+      "frontend-dist/**/*"
+    ],
+    "extraResources": [
+      {
+        "from": "prisma",
+        "to": "prisma",
+        "filter": ["schema.prisma", "migrations/**/*"]
+      },
+      {
+        "from": "../frontend/dist",
+        "to": "frontend-dist"
+      }
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": ["x64"]
+        }
+      ],
+      "icon": "assets/icon.ico"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "installerHeaderIcon": "assets/icon.ico",
+      "shortcutName": "Control iD Device Manager"
+    },
+    "linux": {
+      "target": ["AppImage"],
+      "icon": "assets/icon.png"
+    },
+    "mac": {
+      "target": ["dmg"],
+      "icon": "assets/icon.icns"
+    }
+  }
+}
