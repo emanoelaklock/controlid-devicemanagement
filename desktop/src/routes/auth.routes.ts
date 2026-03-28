@@ -2,18 +2,17 @@ import { Router } from 'express';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import { z } from 'zod';
-import { prisma } from '../database';
+import { getDb } from '../database';
 import { asyncHandler } from '../utils/asyncHandler';
 import { authenticate, AuthPayload } from '../middleware/auth';
 import { AppError } from '../middleware/errorHandler';
 
 const router = Router();
-
 const loginSchema = z.object({ email: z.string().email(), password: z.string().min(1) });
 
 router.post('/login', asyncHandler(async (req, res) => {
   const { email, password } = loginSchema.parse(req.body);
-  const user = await prisma.user.findUnique({ where: { email } });
+  const user = getDb().prepare('SELECT * FROM users WHERE email = ?').get(email) as any;
   if (!user || !user.active) throw new AppError(401, 'Invalid credentials');
   const valid = await bcrypt.compare(password, user.password);
   if (!valid) throw new AppError(401, 'Invalid credentials');
@@ -23,10 +22,7 @@ router.post('/login', asyncHandler(async (req, res) => {
 }));
 
 router.get('/me', authenticate, asyncHandler(async (req, res) => {
-  const user = await prisma.user.findUnique({
-    where: { id: req.user!.userId },
-    select: { id: true, email: true, name: true, role: true },
-  });
+  const user = getDb().prepare('SELECT id, email, name, role FROM users WHERE id = ?').get(req.user!.userId) as any;
   if (!user) throw new AppError(404, 'User not found');
   res.json(user);
 }));

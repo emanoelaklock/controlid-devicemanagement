@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { z } from 'zod';
-import { prisma } from '../database';
+import crypto from 'crypto';
+import { getDb } from '../database';
 import { asyncHandler } from '../utils/asyncHandler';
 import { authenticate, authorize } from '../middleware/auth';
 import { AppError } from '../middleware/errorHandler';
@@ -17,33 +18,48 @@ const accessRuleSchema = z.object({
 
 router.get('/', asyncHandler(async (req, res) => {
   const { deviceId } = req.query;
-  const where = deviceId ? { deviceId: deviceId as string } : {};
-  const rules = await prisma.accessRule.findMany({
-    where, include: { device: { select: { id: true, name: true } }, group: true }, orderBy: { name: 'asc' },
-  });
-  res.json(rules);
+  const db = getDb();
+  let sql = `SELECT ar.*, d.name as device_name, g.name as group_name FROM access_rules ar
+    LEFT JOIN devices d ON ar.device_id = d.id LEFT JOIN person_groups g ON ar.group_id = g.id`;
+  const params: any[] = [];
+  if (deviceId) { sql += ` WHERE ar.device_id = ?`; params.push(deviceId); }
+  sql += ` ORDER BY ar.name ASC`;
+  const rules = db.prepare(sql).all(...params) as any[];
+  res.json(rules.map(r => ({
+    ...r, active: !!r.active,
+    device: { id: r.device_id, name: r.device_name },
+    group: r.group_name ? { name: r.group_name } : null,
+  })));
 }));
 
 router.get('/:id', asyncHandler(async (req, res) => {
-  const rule = await prisma.accessRule.findUnique({ where: { id: req.params.id }, include: { device: true, group: true } });
+  const rule = getDb().prepare('SELECT * FROM access_rules WHERE id = ?').get(req.params.id) as any;
   if (!rule) throw new AppError(404, 'Access rule not found');
-  res.json(rule);
+  res.json({ ...rule, active: !!rule.active });
 }));
 
 router.post('/', authorize('ADMIN', 'OPERATOR'), asyncHandler(async (req, res) => {
   const data = accessRuleSchema.parse(req.body);
-  const rule = await prisma.accessRule.create({ data, include: { device: { select: { id: true, name: true } }, group: true } });
-  res.status(201).json(rule);
+  const id = crypto.randomUUID();
+  getDb().prepare(`INSERT INTO access_rules (id, name, device_id, group_id, time_zone, days_of_week, start_time, end_time, active) VALUES (?,?,?,?,?,?,?,?,?)`)
+    .run(id, data.name, data.deviceId, data.groupId || null, data.timeZone, data.daysOfWeek, data.startTime, data.endTime, data.active ? 1 : 0);
+  res.status(201).json(getDb().prepare('SELECT * FROM access_rules WHERE id = ?').get(id));
 }));
 
 router.put('/:id', authorize('ADMIN', 'OPERATOR'), asyncHandler(async (req, res) => {
   const data = accessRuleSchema.partial().parse(req.body);
-  const rule = await prisma.accessRule.update({ where: { id: req.params.id }, data, include: { device: { select: { id: true, name: true } }, group: true } });
-  res.json(rule);
+  const db = getDb();
+  const existing = db.prepare('SELECT * FROM access_rules WHERE id = ?').get(req.params.id) as any;
+  if (!existing) throw new AppError(404, 'Access rule not found');
+  db.prepare(`UPDATE access_rules SET name=?, device_id=?, group_id=?, time_zone=?, days_of_week=?, start_time=?, end_time=?, active=?, updated_at=datetime('now') WHERE id=?`)
+    .run(data.name ?? existing.name, data.deviceId ?? existing.device_id, data.groupId ?? existing.group_id,
+      data.timeZone ?? existing.time_zone, data.daysOfWeek ?? existing.days_of_week, data.startTime ?? existing.start_time,
+      data.endTime ?? existing.end_time, data.active !== undefined ? (data.active ? 1 : 0) : existing.active, req.params.id);
+  res.json(db.prepare('SELECT * FROM access_rules WHERE id = ?').get(req.params.id));
 }));
 
 router.delete('/:id', authorize('ADMIN'), asyncHandler(async (req, res) => {
-  await prisma.accessRule.delete({ where: { id: req.params.id } });
+  getDb().prepare('DELETE FROM access_rules WHERE id = ?').run(req.params.id);
   res.json({ message: 'Access rule deleted' });
 }));
 

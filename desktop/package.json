@@ -1,6 +1,6 @@
 {
   "name": "controlid-device-manager",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Control iD Device Manager - Desktop Application",
   "main": "dist/main.js",
   "author": "Control iD",
@@ -8,18 +8,17 @@
   "scripts": {
     "build:backend": "tsc",
     "build:frontend": "cd ../frontend && npm install && npm run build",
-    "prisma:generate": "prisma generate",
-    "prebuild": "npm run prisma:generate && npm run build:backend && npm run build:frontend",
-    "postinstall": "prisma generate",
+    "rebuild": "electron-rebuild -f -w better-sqlite3",
+    "postinstall": "npm run rebuild",
     "start": "electron .",
-    "dev": "tsc && electron .",
-    "clean": "node -e \"fs.rmSync('release',{recursive:true,force:true});fs.rmSync('dist',{recursive:true,force:true})\"",
-    "dist": "npm run clean && npm run prebuild && node scripts/verify-prisma.js && electron-builder --win",
-    "dist:linux": "npm run clean && npm run prebuild && node scripts/verify-prisma.js && electron-builder --linux",
-    "dist:mac": "npm run clean && npm run prebuild && node scripts/verify-prisma.js && electron-builder --mac"
+    "dev": "npm run build:backend && electron .",
+    "clean": "node -e \"const fs=require('fs');['release','dist'].forEach(d=>{try{fs.rmSync(d,{recursive:true,force:true})}catch{}})\"",
+    "dist": "npm run clean && npm run build:backend && npm run build:frontend && electron-builder --win",
+    "dist:linux": "npm run clean && npm run build:backend && npm run build:frontend && electron-builder --linux",
+    "dist:mac": "npm run clean && npm run build:backend && npm run build:frontend && electron-builder --mac"
   },
   "dependencies": {
-    "@prisma/client": "^5.20.0",
+    "better-sqlite3": "^11.3.0",
     "bcryptjs": "^2.4.3",
     "cors": "^2.8.5",
     "dotenv": "^16.4.5",
@@ -33,6 +32,7 @@
   },
   "devDependencies": {
     "@types/bcryptjs": "^2.4.6",
+    "@types/better-sqlite3": "^7.6.11",
     "@types/cors": "^2.8.17",
     "@types/express": "^4.17.21",
     "@types/jsonwebtoken": "^9.0.7",
@@ -40,7 +40,7 @@
     "@types/node-cron": "^3.0.11",
     "electron": "^32.1.0",
     "electron-builder": "^25.0.5",
-    "prisma": "^5.20.0",
+    "electron-rebuild": "^3.2.9",
     "typescript": "^5.6.2"
   },
   "build": {
@@ -55,11 +55,6 @@
       "node_modules/**/*"
     ],
     "extraResources": [
-      {
-        "from": "prisma",
-        "to": "prisma",
-        "filter": ["schema.prisma"]
-      },
       {
         "from": "../frontend/dist",
         "to": "frontend-dist"

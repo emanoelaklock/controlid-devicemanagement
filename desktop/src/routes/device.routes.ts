@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { z } from 'zod';
-import { prisma } from '../database';
+import crypto from 'crypto';
+import { getDb } from '../database';
 import { asyncHandler } from '../utils/asyncHandler';
 import { authenticate, authorize } from '../middleware/auth';
 import { AppError } from '../middleware/errorHandler';
@@ -17,42 +18,65 @@ const deviceSchema = z.object({
 });
 
 router.get('/', asyncHandler(async (_req, res) => {
-  const devices = await prisma.device.findMany({ include: { location: true }, orderBy: { name: 'asc' } });
-  res.json(devices.map(({ password: _, ...d }) => d));
+  const db = getDb();
+  const devices = db.prepare(`
+    SELECT d.*, l.name as location_name, l.id as location_id_ref
+    FROM devices d LEFT JOIN locations l ON d.location_id = l.id ORDER BY d.name ASC
+  `).all() as any[];
+  res.json(devices.map(({ password: _, ...d }) => ({
+    ...d, location: d.location_name ? { id: d.location_id_ref, name: d.location_name } : null,
+  })));
 }));
 
 router.get('/:id', asyncHandler(async (req, res) => {
-  const device = await prisma.device.findUnique({ where: { id: req.params.id }, include: { location: true, accessRules: true } });
+  const db = getDb();
+  const device = db.prepare(`
+    SELECT d.*, l.name as location_name FROM devices d LEFT JOIN locations l ON d.location_id = l.id WHERE d.id = ?
+  `).get(req.params.id) as any;
   if (!device) throw new AppError(404, 'Device not found');
   const { password: _, ...sanitized } = device;
+  sanitized.location = device.location_name ? { name: device.location_name } : null;
   res.json(sanitized);
 }));
 
 router.post('/', authorize('ADMIN', 'OPERATOR'), asyncHandler(async (req, res) => {
   const data = deviceSchema.parse(req.body);
-  const device = await prisma.device.create({ data: { ...data, password: encrypt(data.password) }, include: { location: true } });
+  const id = crypto.randomUUID();
+  getDb().prepare(`
+    INSERT INTO devices (id, name, model, serial_number, ip_address, port, login, password, location_id)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(id, data.name, data.model, data.serialNumber, data.ipAddress, data.port, data.login, encrypt(data.password), data.locationId || null);
+  const device = getDb().prepare('SELECT * FROM devices WHERE id = ?').get(id) as any;
   const { password: _, ...sanitized } = device;
   res.status(201).json(sanitized);
 }));
 
 router.put('/:id', authorize('ADMIN', 'OPERATOR'), asyncHandler(async (req, res) => {
   const data = deviceSchema.partial().parse(req.body);
-  const updateData: Record<string, unknown> = { ...data };
-  if (data.password) updateData.password = encrypt(data.password);
-  const device = await prisma.device.update({ where: { id: req.params.id }, data: updateData, include: { location: true } });
-  const { password: _, ...sanitized } = device;
+  const db = getDb();
+  const existing = db.prepare('SELECT * FROM devices WHERE id = ?').get(req.params.id) as any;
+  if (!existing) throw new AppError(404, 'Device not found');
+  db.prepare(`
+    UPDATE devices SET name=?, model=?, serial_number=?, ip_address=?, port=?, login=?, password=?, location_id=?, updated_at=datetime('now') WHERE id=?
+  `).run(
+    data.name ?? existing.name, data.model ?? existing.model, data.serialNumber ?? existing.serial_number,
+    data.ipAddress ?? existing.ip_address, data.port ?? existing.port, data.login ?? existing.login,
+    data.password ? encrypt(data.password) : existing.password, data.locationId ?? existing.location_id, req.params.id
+  );
+  const updated = db.prepare('SELECT * FROM devices WHERE id = ?').get(req.params.id) as any;
+  const { password: _, ...sanitized } = updated;
   res.json(sanitized);
 }));
 
 router.delete('/:id', authorize('ADMIN'), asyncHandler(async (req, res) => {
-  await prisma.device.delete({ where: { id: req.params.id } });
+  getDb().prepare('DELETE FROM devices WHERE id = ?').run(req.params.id);
   res.json({ message: 'Device deleted' });
 }));
 
 router.post('/:id/test-connection', authorize('ADMIN', 'OPERATOR'), asyncHandler(async (req, res) => {
-  const device = await prisma.device.findUnique({ where: { id: req.params.id } });
+  const device = getDb().prepare('SELECT * FROM devices WHERE id = ?').get(req.params.id) as any;
   if (!device) throw new AppError(404, 'Device not found');
-  const api = new ControlIdService(device.ipAddress, device.port, device.login, decrypt(device.password));
+  const api = new ControlIdService(device.ip_address, device.port, device.login, decrypt(device.password));
   const connected = await api.login();
   if (connected) {
     const info = await api.getDeviceInfo();
@@ -64,9 +88,9 @@ router.post('/:id/test-connection', authorize('ADMIN', 'OPERATOR'), asyncHandler
 }));
 
 router.post('/:id/open-door', authorize('ADMIN', 'OPERATOR'), asyncHandler(async (req, res) => {
-  const device = await prisma.device.findUnique({ where: { id: req.params.id } });
+  const device = getDb().prepare('SELECT * FROM devices WHERE id = ?').get(req.params.id) as any;
   if (!device) throw new AppError(404, 'Device not found');
-  const api = new ControlIdService(device.ipAddress, device.port, device.login, decrypt(device.password));
+  const api = new ControlIdService(device.ip_address, device.port, device.login, decrypt(device.password));
   const connected = await api.login();
   if (!connected) throw new AppError(502, 'Could not connect to device');
   const result = await api.openDoor(req.body.doorId || 1);
@@ -75,24 +99,28 @@ router.post('/:id/open-door', authorize('ADMIN', 'OPERATOR'), asyncHandler(async
 }));
 
 router.post('/:id/sync-people', authorize('ADMIN', 'OPERATOR'), asyncHandler(async (req, res) => {
-  const device = await prisma.device.findUnique({ where: { id: req.params.id } });
+  const db = getDb();
+  const device = db.prepare('SELECT * FROM devices WHERE id = ?').get(req.params.id) as any;
   if (!device) throw new AppError(404, 'Device not found');
-  const personDevices = await prisma.personDevice.findMany({ where: { deviceId: device.id, synced: false }, include: { person: true } });
-  const api = new ControlIdService(device.ipAddress, device.port, device.login, decrypt(device.password));
+  const personDevices = db.prepare(`
+    SELECT pd.*, p.name as person_name, p.registration, p.card_number
+    FROM person_devices pd JOIN people p ON pd.person_id = p.id WHERE pd.device_id = ? AND pd.synced = 0
+  `).all(req.params.id) as any[];
+  const api = new ControlIdService(device.ip_address, device.port, device.login, decrypt(device.password));
   const connected = await api.login();
   if (!connected) throw new AppError(502, 'Could not connect to device');
-  await prisma.device.update({ where: { id: device.id }, data: { status: 'SYNCING' } });
+  db.prepare("UPDATE devices SET status = 'SYNCING' WHERE id = ?").run(device.id);
   let synced = 0;
   for (const pd of personDevices) {
-    const result = await api.addUser({ id: parseInt(pd.person.registration, 10), name: pd.person.name, registration: pd.person.registration });
+    const result = await api.addUser({ id: parseInt(pd.registration, 10), name: pd.person_name, registration: pd.registration });
     if (result.success) {
-      if (pd.person.cardNumber) await api.addCard(parseInt(pd.person.registration, 10), parseInt(pd.person.cardNumber, 10));
-      await prisma.personDevice.update({ where: { id: pd.id }, data: { synced: true, syncedAt: new Date() } });
+      if (pd.card_number) await api.addCard(parseInt(pd.registration, 10), parseInt(pd.card_number, 10));
+      db.prepare("UPDATE person_devices SET synced = 1, synced_at = datetime('now') WHERE id = ?").run(pd.id);
       synced++;
     }
   }
   await api.logout();
-  await prisma.device.update({ where: { id: device.id }, data: { status: 'ONLINE', lastSyncAt: new Date() } });
+  db.prepare("UPDATE devices SET status = 'ONLINE', last_sync_at = datetime('now') WHERE id = ?").run(device.id);
   res.json({ synced, total: personDevices.length });
 }));
 
