@@ -3,7 +3,9 @@ import path from 'path';
 import fs from 'fs';
 import bcrypt from 'bcryptjs';
 import crypto from 'crypto';
-import initSqlJs, { Database as SqlJsDatabase } from 'sql.js';
+// @ts-ignore - sql.js has no bundled types
+import initSqlJs from 'sql.js';
+type SqlJsDatabase = any;
 
 // ─── Paths ───────────────────────────────────────────────────────
 const userDataPath = app.isPackaged
