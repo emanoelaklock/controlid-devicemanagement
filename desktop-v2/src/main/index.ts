@@ -3,6 +3,10 @@ import path from 'path';
 import { initDatabase } from './db/database';
 import { registerIpcHandlers } from './ipc/handlers';
 
+// Control iD devices use self-signed SSL certificates.
+// Without this, all HTTPS requests to devices will fail with CERT errors.
+process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
+
 let mainWindow: BrowserWindow | null = null;
 
 function createWindow(): void {
