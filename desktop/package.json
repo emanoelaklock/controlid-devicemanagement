@@ -9,13 +9,14 @@
     "build:backend": "tsc",
     "build:frontend": "cd ../frontend && npm install && npm run build",
     "prisma:generate": "prisma generate",
-    "prisma:migrate": "prisma migrate deploy",
     "prebuild": "npm run prisma:generate && npm run build:backend && npm run build:frontend",
+    "postinstall": "prisma generate",
     "start": "electron .",
     "dev": "tsc && electron .",
-    "dist": "npm run prebuild && electron-builder --win",
-    "dist:linux": "npm run prebuild && electron-builder --linux",
-    "dist:mac": "npm run prebuild && electron-builder --mac"
+    "clean": "node -e \"fs.rmSync('release',{recursive:true,force:true});fs.rmSync('dist',{recursive:true,force:true})\"",
+    "dist": "npm run clean && npm run prebuild && node scripts/verify-prisma.js && electron-builder --win",
+    "dist:linux": "npm run clean && npm run prebuild && node scripts/verify-prisma.js && electron-builder --linux",
+    "dist:mac": "npm run clean && npm run prebuild && node scripts/verify-prisma.js && electron-builder --mac"
   },
   "dependencies": {
     "@prisma/client": "^5.20.0",
@@ -78,7 +79,6 @@
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
-      "installerHeaderIcon": "assets/icon.ico",
       "shortcutName": "Control iD Device Manager"
     },
     "linux": {
