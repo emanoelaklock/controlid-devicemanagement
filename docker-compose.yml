@@ -1,0 +1,51 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: controlid_manager
+      POSTGRES_USER: controlid
+      POSTGRES_PASSWORD: controlid_secret
+    ports:
+      - '5432:5432'
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - '6379:6379'
+    volumes:
+      - redis_data:/data
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    ports:
+      - '3001:3001'
+    environment:
+      DATABASE_URL: postgresql://controlid:controlid_secret@postgres:5432/controlid_manager
+      REDIS_URL: redis://redis:6379
+      JWT_SECRET: change-me-in-production-min-32-chars
+      ENCRYPTION_KEY: change-me-32-char-encryption-key!
+      NODE_ENV: production
+      PORT: 3001
+      CORS_ORIGIN: http://localhost:3000
+    depends_on:
+      - postgres
+      - redis
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    ports:
+      - '3000:80'
+    depends_on:
+      - backend
+
+volumes:
+  postgres_data:
+  redis_data:
