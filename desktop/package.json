@@ -50,19 +50,26 @@
     },
     "files": [
       "dist/**/*",
-      "prisma/**/*",
       "node_modules/**/*",
-      "frontend-dist/**/*"
+      "!node_modules/.prisma/client/*.node"
+    ],
+    "asarUnpack": [
+      "node_modules/.prisma/**/*",
+      "node_modules/@prisma/engines/**/*"
     ],
     "extraResources": [
       {
         "from": "prisma",
         "to": "prisma",
-        "filter": ["schema.prisma", "migrations/**/*"]
+        "filter": ["schema.prisma"]
       },
       {
         "from": "../frontend/dist",
         "to": "frontend-dist"
+      },
+      {
+        "from": "node_modules/.prisma",
+        "to": "prisma-engines"
       }
     ],
     "win": {
