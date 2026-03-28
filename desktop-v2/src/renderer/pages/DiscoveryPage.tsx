@@ -3,7 +3,7 @@ import { ipc } from '../hooks/useIpc';
 
 export default function DiscoveryPage() {
   const [ipRange, setIpRange] = useState('192.168.1.*');
-  const [ports, setPorts] = useState('443');
+  const [ports, setPorts] = useState('80, 443');
   const [timeout, setTimeout_] = useState(3000);
   const [concurrency, setConcurrency] = useState(20);
   const [scanning, setScanning] = useState(false);

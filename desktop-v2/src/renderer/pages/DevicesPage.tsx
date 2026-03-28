@@ -12,7 +12,7 @@ export default function DevicesPage() {
   const [search, setSearch] = useState('');
   const [detail, setDetail] = useState<any>(null);
   const [showAdd, setShowAdd] = useState(false);
-  const [addForm, setAddForm] = useState({ name: '', ip_address: '', port: 443, manufacturer: 'controlid', model: '' });
+  const [addForm, setAddForm] = useState({ name: '', ip_address: '', port: 80, manufacturer: 'controlid', model: '' });
 
   const load = useCallback(() => { ipc.listDevices().then(setDevices); }, []);
   useEffect(() => { load(); }, [load]);
