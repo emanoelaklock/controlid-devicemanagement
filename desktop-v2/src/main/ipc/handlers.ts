@@ -125,8 +125,12 @@ export function registerIpcHandlers(getWindow: () => BrowserWindow | null): void
         if (!adapter) throw new Error('No adapter');
         const info = await adapter.authenticate(conn.ip, conn.port, conn.username, conn.password);
         if (info) {
-          run(`UPDATE devices SET status='online', last_heartbeat=datetime('now') WHERE id=?`, [device.id]);
-          return `Online - ${info.model} v${info.firmwareVersion}`;
+          run(`UPDATE devices SET status='online', firmware_version=?, model=?, serial_number=?,
+            mac_address=?, last_heartbeat=datetime('now'), https_enabled=?, dhcp_enabled=?,
+            hostname=?, updated_at=datetime('now') WHERE id=?`,
+            [info.firmwareVersion, info.model, info.serialNumber, info.macAddress,
+             info.httpsEnabled ? 1 : 0, info.dhcpEnabled ? 1 : 0, info.hostname, device.id]);
+          return `Online - ${info.model} v${info.firmwareVersion} MAC:${info.macAddress || 'N/A'}`;
         }
         run(`UPDATE devices SET status='unreachable' WHERE id=?`, [device.id]);
         throw new Error('Could not connect');
