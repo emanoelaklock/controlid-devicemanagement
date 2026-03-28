@@ -29,7 +29,7 @@ contextBridge.exposeInMainWorld('api', {
   // ─── Listen (main → renderer events) ───────────────────────────
   on: (channel: string, callback: (...args: any[]) => void) => {
     const allowedEvents = [
-      'discovery:progress', 'discovery:complete',
+      'discovery:progress', 'discovery:device-found', 'discovery:complete',
       'job:progress', 'job:complete',
       'heartbeat:update',
     ];

@@ -121,17 +121,22 @@ export class DiscoveryService {
                   device.existingDeviceId = existing[0].id;
                 }
                 results.push(device);
+
+                // Send device immediately to renderer as it's found
+                if (window && !window.isDestroyed()) {
+                  window.webContents.send('discovery:device-found', device);
+                }
+
                 break; // Found a match, skip other adapters
               }
             } catch { /* skip */ }
           }
 
           completed++;
-          const progress = Math.round((completed / ips.length) * 100);
-          run(`UPDATE jobs SET completed_items=?, progress=? WHERE id=?`, [completed, progress, jobId]);
 
-          // Send progress to renderer
+          // Send progress to renderer (every IP for smooth progress bar)
           if (window && !window.isDestroyed()) {
+            const progress = Math.round((completed / ips.length) * 100);
             window.webContents.send('discovery:progress', {
               jobId, completed, total: ips.length, progress, found: results.length,
             });
