@@ -2,6 +2,7 @@ import { app, BrowserWindow } from 'electron';
 import path from 'path';
 import { initDatabase } from './db/database';
 import { registerIpcHandlers } from './ipc/handlers';
+import { heartbeatService } from './services/heartbeat.service';
 
 // Control iD devices use self-signed SSL certificates.
 // Without this, all HTTPS requests to devices will fail with CERT errors.
@@ -43,6 +44,7 @@ app.whenReady().then(async () => {
     await initDatabase();
     registerIpcHandlers(() => mainWindow);
     createWindow();
+    heartbeatService.start(() => mainWindow, 10000); // Check every 10 seconds
   } catch (error) {
     console.error('Failed to start:', error);
     app.quit();

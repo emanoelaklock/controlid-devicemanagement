@@ -30,6 +30,7 @@ contextBridge.exposeInMainWorld('api', {
     const allowedEvents = [
       'discovery:progress', 'discovery:complete',
       'job:progress', 'job:complete',
+      'heartbeat:update',
     ];
     if (!allowedEvents.includes(channel)) return;
     const sub = (_event: any, ...args: any[]) => callback(...args);

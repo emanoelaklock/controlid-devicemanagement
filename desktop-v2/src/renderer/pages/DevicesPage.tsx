@@ -20,7 +20,14 @@ export default function DevicesPage() {
     ipc.listDevices().then(setDevices);
     ipc.listCredentials().then(setCredentials);
   }, []);
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => {
+    load();
+    // Listen for heartbeat updates to refresh device statuses
+    const unsub = ipc.on('heartbeat:update', () => {
+      ipc.listDevices().then(setDevices);
+    });
+    return () => { unsub?.(); };
+  }, [load]);
 
   const filtered = devices.filter(d =>
     !search || d.name?.toLowerCase().includes(search.toLowerCase()) ||

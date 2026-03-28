@@ -65,6 +65,7 @@ export class ControlIdAdapter implements DeviceAdapter {
       const loginRes = await this.httpRequest(proto, ip, port, '/login.fcgi', JSON.stringify({ login: username, password }), 10000);
       if (loginRes?.session) {
         const info = await this.httpRequest(proto, ip, port, '/system_information.fcgi', '{}', 10000, loginRes.session);
+        console.log('[ControlID] system_information response:', JSON.stringify(info, null, 2));
         await this.httpRequest(proto, ip, port, '/logout.fcgi', '{}', 5000, loginRes.session).catch(() => {});
         return this.buildDeviceInfo(info, proto);
       }
@@ -190,15 +191,16 @@ export class ControlIdAdapter implements DeviceAdapter {
   }
 
   private buildDeviceInfo(info: any, proto: string): DeviceInfo {
+    if (!info) info = {};
     return {
       manufacturer: 'controlid',
-      model: info?.model ?? info?.product ?? 'Unknown',
-      serialNumber: info?.serial ?? '',
-      macAddress: info?.mac ?? null,
-      firmwareVersion: info?.firmware ?? info?.version ?? 'Unknown',
-      hostname: info?.hostname ?? null,
+      model: info.model ?? info.product ?? info.device_name ?? info.name ?? 'Unknown',
+      serialNumber: info.serial ?? info.serial_number ?? info.serialNumber ?? '',
+      macAddress: info.mac ?? info.mac_address ?? info.macAddress ?? info.MAC ?? null,
+      firmwareVersion: info.firmware ?? info.version ?? info.firmware_version ?? info.sw_version ?? 'Unknown',
+      hostname: info.hostname ?? info.host_name ?? info.device_id ?? null,
       httpsEnabled: proto === 'https',
-      dhcpEnabled: !!info?.dhcp,
+      dhcpEnabled: !!(info.dhcp ?? info.dhcp_enabled ?? info.DHCP ?? info.network?.dhcp),
     };
   }
 
