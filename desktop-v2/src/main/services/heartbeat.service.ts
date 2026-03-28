@@ -1,40 +1,36 @@
 import net from 'net';
 import { BrowserWindow } from 'electron';
-import { query, run } from '../db/queries';
+import { query, queryOne, run } from '../db/queries';
 import { saveDb } from '../db/database';
+import { adapterRegistry } from '../adapters/registry';
 
 /**
- * Heartbeat monitor.
- * Uses raw TCP socket connection to check if devices are reachable.
- * This is the most reliable method - doesn't depend on HTTP responses,
- * authentication, or specific API endpoints. If TCP connects, device is up.
+ * Heartbeat monitor with DHCP IP tracking.
+ * - TCP pings all devices every N seconds
+ * - When a DHCP device goes offline, scans the subnet to find it by MAC
+ * - Updates IP address when device is found on a new IP
  */
 export class HeartbeatService {
   private interval: ReturnType<typeof setInterval> | null = null;
   private checking = false;
+  private offlineCounters = new Map<string, number>(); // deviceId -> consecutive offline count
 
-  start(getWindow: () => BrowserWindow | null, intervalMs = 10000): void {
-    // Initial check after 3 seconds
+  start(getWindow: () => BrowserWindow | null, intervalMs = 5000): void {
     setTimeout(() => this.checkAll(getWindow), 3000);
-
     this.interval = setInterval(() => this.checkAll(getWindow), intervalMs);
     console.log(`[Heartbeat] Started (every ${intervalMs / 1000}s)`);
   }
 
   stop(): void {
-    if (this.interval) {
-      clearInterval(this.interval);
-      this.interval = null;
-    }
+    if (this.interval) { clearInterval(this.interval); this.interval = null; }
   }
 
   private async checkAll(getWindow: () => BrowserWindow | null): Promise<void> {
-    // Prevent overlapping checks
     if (this.checking) return;
     this.checking = true;
 
     try {
-      const devices = query('SELECT id, ip_address, port, status FROM devices');
+      const devices = query('SELECT id, ip_address, port, status, mac_address, dhcp_enabled FROM devices');
       if (devices.length === 0) { this.checking = false; return; }
 
       let changed = false;
@@ -42,28 +38,43 @@ export class HeartbeatService {
       const results = await Promise.allSettled(
         devices.map(async (device: any) => {
           const reachable = await this.tcpPing(device.ip_address, device.port, 3000);
-          const newStatus = reachable ? 'online' : 'offline';
 
           if (reachable) {
-            run(`UPDATE devices SET status='online', last_heartbeat=datetime('now'), updated_at=datetime('now') WHERE id=?`, [device.id]);
-          } else if (device.status !== 'offline') {
-            run(`UPDATE devices SET status='offline', updated_at=datetime('now') WHERE id=?`, [device.id]);
+            this.offlineCounters.delete(device.id);
+            if (device.status !== 'online') {
+              run(`UPDATE devices SET status='online', last_heartbeat=datetime('now'), updated_at=datetime('now') WHERE id=?`, [device.id]);
+              changed = true;
+            } else {
+              run(`UPDATE devices SET last_heartbeat=datetime('now') WHERE id=?`, [device.id]);
+            }
+            return { id: device.id, status: 'online' };
           }
-          if (device.status !== newStatus) changed = true;
 
-          return { id: device.id, status: newStatus };
+          // Device is offline
+          const offlineCount = (this.offlineCounters.get(device.id) || 0) + 1;
+          this.offlineCounters.set(device.id, offlineCount);
+
+          if (device.status !== 'offline') {
+            run(`UPDATE devices SET status='offline', updated_at=datetime('now') WHERE id=?`, [device.id]);
+            changed = true;
+          }
+
+          // If DHCP device is offline for 3+ cycles and has a MAC, try to find new IP
+          if (device.dhcp_enabled && device.mac_address && offlineCount >= 3 && offlineCount % 3 === 0) {
+            console.log(`[Heartbeat] DHCP device ${device.mac_address} offline for ${offlineCount} cycles, scanning for new IP...`);
+            this.findDeviceByMac(device).catch(() => {});
+          }
+
+          return { id: device.id, status: 'offline' };
         })
       );
 
-      // Always save and notify
       saveDb();
 
       const win = getWindow();
       if (win && !win.isDestroyed()) {
-        const statuses = results
-          .filter((r): r is PromiseFulfilledResult<any> => r.status === 'fulfilled')
-          .map(r => r.value);
-        win.webContents.send('heartbeat:update', statuses);
+        win.webContents.send('heartbeat:update',
+          results.filter((r): r is PromiseFulfilledResult<any> => r.status === 'fulfilled').map(r => r.value));
       }
 
       if (changed) {
@@ -79,31 +90,59 @@ export class HeartbeatService {
   }
 
   /**
-   * TCP ping - attempts to establish a TCP connection to the device.
-   * If the connection succeeds within the timeout, the device is reachable.
-   * This works regardless of HTTP/HTTPS, API version, or authentication.
+   * Scan the device's subnet to find it on a new IP (DHCP IP change).
+   * Uses the device's MAC address to identify it.
    */
+  private async findDeviceByMac(device: any): Promise<void> {
+    const oldIp = device.ip_address;
+    const subnet = oldIp.split('.').slice(0, 3).join('.');
+    const adapter = adapterRegistry.getAll()[0]; // Use first adapter for probing
+    if (!adapter) return;
+
+    // Scan subnet in parallel batches
+    const ips: string[] = [];
+    for (let i = 1; i <= 254; i++) {
+      const ip = `${subnet}.${i}`;
+      if (ip !== oldIp) ips.push(ip);
+    }
+
+    // Check 30 IPs at a time
+    for (let i = 0; i < ips.length; i += 30) {
+      const batch = ips.slice(i, i + 30);
+      const results = await Promise.allSettled(
+        batch.map(async (ip) => {
+          const found = await adapter.probe(ip, device.port, 2000);
+          if (found && found.macAddress?.toUpperCase() === device.mac_address?.toUpperCase()) {
+            return ip;
+          }
+          return null;
+        })
+      );
+
+      for (const result of results) {
+        if (result.status === 'fulfilled' && result.value) {
+          const newIp = result.value;
+          console.log(`[Heartbeat] Found ${device.mac_address} at new IP: ${newIp} (was ${oldIp})`);
+          run(`UPDATE devices SET ip_address=?, status='online', last_heartbeat=datetime('now'), updated_at=datetime('now') WHERE id=?`,
+            [newIp, device.id]);
+          run(`INSERT INTO audit_logs (id, action, category, device_id, device_name, details, severity) VALUES (?,?,?,?,?,?,?)`,
+            [require('uuid').v4(), 'ip_changed', 'device', device.id, device.name,
+             `DHCP IP changed: ${oldIp} -> ${newIp}`, 'warning']);
+          this.offlineCounters.delete(device.id);
+          saveDb();
+          return;
+        }
+      }
+    }
+  }
+
   private tcpPing(ip: string, port: number, timeoutMs: number): Promise<boolean> {
     return new Promise((resolve) => {
       const socket = new net.Socket();
-
       socket.setTimeout(timeoutMs);
-
-      socket.on('connect', () => {
-        socket.destroy();
-        resolve(true);
-      });
-
-      socket.on('error', () => {
-        socket.destroy();
-        resolve(false);
-      });
-
-      socket.on('timeout', () => {
-        socket.destroy();
-        resolve(false);
-      });
-
+      socket.on('connect', () => { socket.destroy(); resolve(true); });
+      socket.on('error', () => { socket.destroy(); resolve(false); });
+      socket.on('timeout', () => { socket.destroy(); resolve(false); });
       socket.connect(port, ip);
     });
   }

@@ -182,9 +182,10 @@ export default function DevicesPage() {
                 <th className="px-3 py-2.5">Name</th>
                 <th className="px-3 py-2.5">IP Address</th>
                 <th className="px-3 py-2.5">Model</th>
+                <th className="px-3 py-2.5">Serial</th>
                 <th className="px-3 py-2.5">Firmware</th>
                 <th className="px-3 py-2.5">MAC Address</th>
-                <th className="px-3 py-2.5">Credential</th>
+                <th className="px-3 py-2.5">DHCP</th>
                 <th className="px-3 py-2.5">Last Heartbeat</th>
               </tr>
             </thead>
@@ -202,14 +203,15 @@ export default function DevicesPage() {
                       className="text-brand-400 hover:text-brand-300 hover:underline">{d.ip_address}:{d.port}</a>
                   </td>
                   <td className="px-3 py-2 text-slate-400">{d.model || '-'}</td>
+                  <td className="px-3 py-2 text-slate-500 text-xs">{d.serial_number || '-'}</td>
                   <td className="px-3 py-2 text-slate-400 text-xs">{d.firmware_version || '-'}</td>
                   <td className="px-3 py-2 text-slate-500 font-mono text-xs">{d.mac_address || '-'}</td>
-                  <td className="px-3 py-2 text-xs">{d.credential_name ? <span className="text-emerald-400">{d.credential_name}</span> : <span className="text-red-400">None</span>}</td>
+                  <td className="px-3 py-2 text-xs">{d.dhcp_enabled ? <span className="text-emerald-400">Yes</span> : <span className="text-slate-500">No</span>}</td>
                   <td className="px-3 py-2 text-slate-500 text-xs">{d.last_heartbeat ? new Date(d.last_heartbeat).toLocaleString() : 'Never'}</td>
                 </tr>
               ))}
               {filtered.length === 0 && (
-                <tr><td colSpan={9} className="px-4 py-12 text-center text-slate-600">No devices found. Use Discovery to scan your network.</td></tr>
+                <tr><td colSpan={11} className="px-4 py-12 text-center text-slate-600">No devices found. Use Discovery to scan your network.</td></tr>
               )}
             </tbody>
           </table>
