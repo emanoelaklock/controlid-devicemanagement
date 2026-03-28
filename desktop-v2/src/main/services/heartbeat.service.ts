@@ -1,23 +1,23 @@
-import http from 'http';
-import https from 'https';
+import net from 'net';
 import { BrowserWindow } from 'electron';
 import { query, run } from '../db/queries';
-
-const httpsAgent = new https.Agent({ rejectUnauthorized: false });
+import { saveDb } from '../db/database';
 
 /**
- * Lightweight heartbeat monitor.
- * Pings all managed devices every N seconds via a simple HTTP HEAD/GET
- * and updates their status without requiring authentication.
+ * Heartbeat monitor.
+ * Uses raw TCP socket connection to check if devices are reachable.
+ * This is the most reliable method - doesn't depend on HTTP responses,
+ * authentication, or specific API endpoints. If TCP connects, device is up.
  */
 export class HeartbeatService {
   private interval: ReturnType<typeof setInterval> | null = null;
+  private checking = false;
 
-  start(window: () => BrowserWindow | null, intervalMs = 10000): void {
-    // Initial check after 2 seconds
-    setTimeout(() => this.checkAll(window), 2000);
+  start(getWindow: () => BrowserWindow | null, intervalMs = 10000): void {
+    // Initial check after 3 seconds
+    setTimeout(() => this.checkAll(getWindow), 3000);
 
-    this.interval = setInterval(() => this.checkAll(window), intervalMs);
+    this.interval = setInterval(() => this.checkAll(getWindow), intervalMs);
     console.log(`[Heartbeat] Started (every ${intervalMs / 1000}s)`);
   }
 
@@ -29,59 +29,82 @@ export class HeartbeatService {
   }
 
   private async checkAll(getWindow: () => BrowserWindow | null): Promise<void> {
-    const devices = query('SELECT id, ip_address, port, status FROM devices');
-    if (devices.length === 0) return;
+    // Prevent overlapping checks
+    if (this.checking) return;
+    this.checking = true;
 
-    const results = await Promise.allSettled(
-      devices.map(async (device: any) => {
-        const reachable = await this.ping(device.ip_address, device.port, 3000);
-        const newStatus = reachable ? 'online' : 'offline';
+    try {
+      const devices = query('SELECT id, ip_address, port, status FROM devices');
+      if (devices.length === 0) { this.checking = false; return; }
 
-        if (device.status !== newStatus) {
-          run(`UPDATE devices SET status=?, last_heartbeat=CASE WHEN ?='online' THEN datetime('now') ELSE last_heartbeat END, updated_at=datetime('now') WHERE id=?`,
-            [newStatus, newStatus, device.id]);
-        } else if (reachable) {
-          run(`UPDATE devices SET last_heartbeat=datetime('now') WHERE id=?`, [device.id]);
-        }
+      let changed = false;
 
-        return { id: device.id, status: newStatus };
-      })
-    );
+      const results = await Promise.allSettled(
+        devices.map(async (device: any) => {
+          const reachable = await this.tcpPing(device.ip_address, device.port, 3000);
+          const newStatus = reachable ? 'online' : 'offline';
 
-    // Notify renderer
-    const win = getWindow();
-    if (win && !win.isDestroyed()) {
-      const statuses = results
-        .filter((r): r is PromiseFulfilledResult<any> => r.status === 'fulfilled')
-        .map(r => r.value);
-      win.webContents.send('heartbeat:update', statuses);
+          if (reachable) {
+            run(`UPDATE devices SET status='online', last_heartbeat=datetime('now'), updated_at=datetime('now') WHERE id=?`, [device.id]);
+          } else if (device.status !== 'offline') {
+            run(`UPDATE devices SET status='offline', updated_at=datetime('now') WHERE id=?`, [device.id]);
+          }
+          if (device.status !== newStatus) changed = true;
+
+          return { id: device.id, status: newStatus };
+        })
+      );
+
+      // Always save and notify
+      saveDb();
+
+      const win = getWindow();
+      if (win && !win.isDestroyed()) {
+        const statuses = results
+          .filter((r): r is PromiseFulfilledResult<any> => r.status === 'fulfilled')
+          .map(r => r.value);
+        win.webContents.send('heartbeat:update', statuses);
+      }
+
+      if (changed) {
+        console.log('[Heartbeat] Status changed:', results
+          .filter((r): r is PromiseFulfilledResult<any> => r.status === 'fulfilled')
+          .map(r => `${r.value.id.substring(0, 8)}=${r.value.status}`).join(', '));
+      }
+    } catch (err) {
+      console.error('[Heartbeat] Error:', err);
+    } finally {
+      this.checking = false;
     }
   }
 
   /**
-   * Quick reachability check - just tries to establish TCP connection
-   * and get any HTTP response from the device.
+   * TCP ping - attempts to establish a TCP connection to the device.
+   * If the connection succeeds within the timeout, the device is reachable.
+   * This works regardless of HTTP/HTTPS, API version, or authentication.
    */
-  private ping(ip: string, port: number, timeoutMs: number): Promise<boolean> {
+  private tcpPing(ip: string, port: number, timeoutMs: number): Promise<boolean> {
     return new Promise((resolve) => {
-      const mod = port === 443 ? https : http;
-      const options: https.RequestOptions = {
-        hostname: ip,
-        port,
-        path: '/',
-        method: 'HEAD',
-        timeout: timeoutMs,
-        ...(port === 443 ? { agent: httpsAgent } : {}),
-      };
+      const socket = new net.Socket();
 
-      const req = mod.request(options, (res) => {
-        res.resume(); // consume response
+      socket.setTimeout(timeoutMs);
+
+      socket.on('connect', () => {
+        socket.destroy();
         resolve(true);
       });
 
-      req.on('error', () => resolve(false));
-      req.on('timeout', () => { req.destroy(); resolve(false); });
-      req.end();
+      socket.on('error', () => {
+        socket.destroy();
+        resolve(false);
+      });
+
+      socket.on('timeout', () => {
+        socket.destroy();
+        resolve(false);
+      });
+
+      socket.connect(port, ip);
     });
   }
 }

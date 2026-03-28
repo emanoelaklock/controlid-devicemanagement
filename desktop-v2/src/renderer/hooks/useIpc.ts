@@ -55,7 +55,12 @@ export const ipc = {
   listBackups: (deviceId: string) => window.api.invoke('config:backups', deviceId),
   restoreConfig: (deviceId: string, backupId: string) => window.api.invoke('config:restore', { deviceId, backupId }),
 
-  // Events
-  on: window?.api?.on?.bind(window.api) ?? (() => undefined),
-  removeAllListeners: window?.api?.removeAllListeners?.bind(window.api) ?? (() => {}),
+  // Events - must be lazy to ensure window.api is available
+  on: (channel: string, callback: (...args: any[]) => void) => {
+    if (window?.api?.on) return window.api.on(channel, callback);
+    return undefined;
+  },
+  removeAllListeners: (channel: string) => {
+    if (window?.api?.removeAllListeners) window.api.removeAllListeners(channel);
+  },
 };
