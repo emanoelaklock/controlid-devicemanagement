@@ -66,8 +66,15 @@ export class ControlIdAdapter implements DeviceAdapter {
       if (loginRes?.session) {
         const info = await this.httpRequest(proto, ip, port, '/system_information.fcgi', '{}', 10000, loginRes.session);
         console.log('[ControlID] system_information response:', JSON.stringify(info, null, 2));
+
+        // Also try to get network config for MAC and DHCP
+        const netConfig = await this.httpRequest(proto, ip, port, '/get_configuration.fcgi', '{}', 10000, loginRes.session).catch(() => null);
+        if (netConfig) {
+          console.log('[ControlID] get_configuration response:', JSON.stringify(netConfig, null, 2));
+        }
+
         await this.httpRequest(proto, ip, port, '/logout.fcgi', '{}', 5000, loginRes.session).catch(() => {});
-        return this.buildDeviceInfo(info, proto);
+        return this.buildDeviceInfo(info, proto, netConfig);
       }
     } catch { /* try next */ }
 
@@ -97,8 +104,9 @@ export class ControlIdAdapter implements DeviceAdapter {
     const session = await this.login(conn);
     const proto = conn.port === 443 ? 'https' : 'http';
     const info = await this.httpRequest(proto, conn.ip, conn.port, '/system_information.fcgi', '{}', 10000, session);
+    const netConfig = await this.httpRequest(proto, conn.ip, conn.port, '/get_configuration.fcgi', '{}', 10000, session).catch(() => null);
     await this.httpRequest(proto, conn.ip, conn.port, '/logout.fcgi', '{}', 5000, session).catch(() => {});
-    return this.buildDeviceInfo(info, proto);
+    return this.buildDeviceInfo(info, proto, netConfig);
   }
 
   async reboot(conn: DeviceConnection): Promise<boolean> {
@@ -190,17 +198,20 @@ export class ControlIdAdapter implements DeviceAdapter {
     };
   }
 
-  private buildDeviceInfo(info: any, proto: string): DeviceInfo {
+  private buildDeviceInfo(info: any, proto: string, netConfig?: any): DeviceInfo {
     if (!info) info = {};
+    const net = netConfig?.network ?? netConfig?.general?.network ?? netConfig ?? {};
+
     return {
       manufacturer: 'controlid',
       model: info.model ?? info.product ?? info.device_name ?? info.name ?? 'Unknown',
       serialNumber: info.serial ?? info.serial_number ?? info.serialNumber ?? '',
-      macAddress: info.mac ?? info.mac_address ?? info.macAddress ?? info.MAC ?? null,
+      macAddress: info.mac ?? info.mac_address ?? info.macAddress ?? info.MAC
+        ?? net.mac ?? net.mac_address ?? net.MAC ?? null,
       firmwareVersion: info.firmware ?? info.version ?? info.firmware_version ?? info.sw_version ?? 'Unknown',
-      hostname: info.hostname ?? info.host_name ?? info.device_id ?? null,
+      hostname: info.hostname ?? info.host_name ?? info.device_id ?? net.hostname ?? null,
       httpsEnabled: proto === 'https',
-      dhcpEnabled: !!(info.dhcp ?? info.dhcp_enabled ?? info.DHCP ?? info.network?.dhcp),
+      dhcpEnabled: !!(info.dhcp ?? info.dhcp_enabled ?? net.dhcp ?? net.DHCP ?? false),
     };
   }
 

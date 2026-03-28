@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { ipc } from '../hooks/useIpc';
 
 const STATUS_COLORS: Record<string, string> = {
@@ -14,25 +14,41 @@ export default function DevicesPage() {
   const [detail, setDetail] = useState<any>(null);
   const [showAdd, setShowAdd] = useState(false);
   const [testing, setTesting] = useState(false);
+  const [editing, setEditing] = useState<string | null>(null); // field being edited
+  const [editValue, setEditValue] = useState('');
   const [addForm, setAddForm] = useState({ name: '', ip_address: '', port: 80, manufacturer: 'controlid', model: '' });
+  const detailRef = useRef<any>(null); // keep detail in sync
 
-  const load = useCallback(() => {
-    ipc.listDevices().then(setDevices);
-    ipc.listCredentials().then(setCredentials);
+  const load = useCallback(async () => {
+    const [devs, creds] = await Promise.all([ipc.listDevices(), ipc.listCredentials()]);
+    setDevices(devs);
+    setCredentials(creds);
+    // Update detail panel if open
+    if (detailRef.current) {
+      const updated = devs.find((d: any) => d.id === detailRef.current.id);
+      if (updated) {
+        setDetail(updated);
+        detailRef.current = updated;
+      }
+    }
   }, []);
+
   useEffect(() => {
     load();
-    // Listen for heartbeat updates to refresh device statuses
-    const unsub = ipc.on('heartbeat:update', () => {
-      ipc.listDevices().then(setDevices);
-    });
-    return () => { unsub?.(); };
+    // Heartbeat auto-refresh
+    const unsub = ipc.on('heartbeat:update', () => load());
+    // Also poll every 5 seconds as backup
+    const interval = setInterval(load, 5000);
+    return () => { unsub?.(); clearInterval(interval); };
   }, [load]);
 
   const filtered = devices.filter(d =>
     !search || d.name?.toLowerCase().includes(search.toLowerCase()) ||
-    d.ip_address?.includes(search) || d.model?.toLowerCase().includes(search.toLowerCase())
+    d.ip_address?.includes(search) || d.model?.toLowerCase().includes(search.toLowerCase()) ||
+    d.firmware_version?.includes(search) || d.mac_address?.toLowerCase().includes(search.toLowerCase())
   );
+
+  const setDetailAndRef = (d: any) => { setDetail(d); detailRef.current = d; };
 
   const toggleSelect = (id: string) => {
     const next = new Set(selected);
@@ -46,7 +62,11 @@ export default function DevicesPage() {
   };
 
   const handleAdd = async () => {
-    await ipc.createDevice(addForm);
+    if (!addForm.ip_address) return alert('IP Address is required');
+    await ipc.createDevice({
+      ...addForm,
+      name: addForm.name || addForm.ip_address,
+    });
     setShowAdd(false);
     setAddForm({ name: '', ip_address: '', port: 80, manufacturer: 'controlid', model: '' });
     load();
@@ -67,7 +87,7 @@ export default function DevicesPage() {
   const handleDelete = async (id: string) => {
     if (!confirm('Delete this device?')) return;
     await ipc.deleteDevice(id);
-    setDetail(null);
+    setDetailAndRef(null);
     load();
   };
 
@@ -75,12 +95,8 @@ export default function DevicesPage() {
     setTesting(true);
     try {
       const result = await ipc.testConnection(deviceId);
-      const updated = await ipc.getDevice(deviceId);
-      setDetail(updated);
-      load();
-      if (!result.connected) {
-        alert('Could not connect. Check credentials and port.');
-      }
+      await load();
+      if (!result.connected) alert('Could not connect. Check credentials and port.');
     } catch (err: any) {
       alert(`Connection failed: ${err.message || err}`);
     } finally {
@@ -90,31 +106,38 @@ export default function DevicesPage() {
 
   const handleAssignCredential = async (deviceId: string, credentialId: string) => {
     await ipc.updateDevice(deviceId, { credential_id: credentialId || null });
-    const updated = await ipc.getDevice(deviceId);
-    setDetail(updated);
-    load();
+    await load();
   };
+
+  const startEdit = (field: string, currentValue: string) => {
+    setEditing(field);
+    setEditValue(currentValue || '');
+  };
+
+  const saveEdit = async () => {
+    if (!detail || !editing) return;
+    await ipc.updateDevice(detail.id, { [editing]: editValue });
+    setEditing(null);
+    await load();
+  };
+
+  const cancelEdit = () => { setEditing(null); setEditValue(''); };
 
   return (
     <div className="flex h-full">
       {/* Main table area */}
-      <div className="flex-1 flex flex-col">
+      <div className="flex-1 flex flex-col min-w-0">
         {/* Toolbar */}
-        <div className="px-4 py-3 border-b border-slate-800 flex items-center gap-3 bg-slate-900/50">
+        <div className="px-4 py-3 border-b border-slate-800 flex items-center gap-3 bg-slate-900/50 flex-shrink-0">
           <h1 className="text-lg font-bold text-white mr-4">Devices</h1>
-          <input
-            placeholder="Search devices..."
-            value={search}
-            onChange={e => setSearch(e.target.value)}
-            className="px-3 py-1.5 bg-slate-800 border border-slate-700 rounded-lg text-sm text-white placeholder-slate-500 w-64"
-          />
+          <input placeholder="Search..." value={search} onChange={e => setSearch(e.target.value)}
+            className="px-3 py-1.5 bg-slate-800 border border-slate-700 rounded-lg text-sm text-white placeholder-slate-500 w-64" />
           <span className="text-xs text-slate-500">{filtered.length} device(s)</span>
           <div className="flex-1" />
-
           {selected.size > 0 && (
             <div className="flex items-center gap-2">
               <span className="text-xs text-brand-400">{selected.size} selected</span>
-              <button onClick={handleBatchTest} className="px-3 py-1.5 bg-blue-600 text-white text-xs rounded-lg hover:bg-blue-700">Test Connection</button>
+              <button onClick={handleBatchTest} className="px-3 py-1.5 bg-blue-600 text-white text-xs rounded-lg hover:bg-blue-700">Test</button>
               <button onClick={handleBatchReboot} className="px-3 py-1.5 bg-amber-600 text-white text-xs rounded-lg hover:bg-amber-700">Reboot</button>
             </div>
           )}
@@ -123,9 +146,8 @@ export default function DevicesPage() {
           </button>
         </div>
 
-        {/* Add form */}
         {showAdd && (
-          <div className="px-4 py-3 bg-slate-800/50 border-b border-slate-700 flex items-center gap-3">
+          <div className="px-4 py-3 bg-slate-800/50 border-b border-slate-700 flex items-center gap-3 flex-shrink-0">
             <input placeholder="Name" value={addForm.name} onChange={e => setAddForm({...addForm, name: e.target.value})} className="px-2 py-1.5 bg-slate-800 border border-slate-700 rounded text-sm text-white w-40" />
             <input placeholder="IP Address" value={addForm.ip_address} onChange={e => setAddForm({...addForm, ip_address: e.target.value})} className="px-2 py-1.5 bg-slate-800 border border-slate-700 rounded text-sm text-white w-40" />
             <input placeholder="Port" type="number" value={addForm.port} onChange={e => setAddForm({...addForm, port: Number(e.target.value)})} className="px-2 py-1.5 bg-slate-800 border border-slate-700 rounded text-sm text-white w-20" />
@@ -147,12 +169,13 @@ export default function DevicesPage() {
                 <th className="px-3 py-2.5">Firmware</th>
                 <th className="px-3 py-2.5">MAC Address</th>
                 <th className="px-3 py-2.5">Credential</th>
-                <th className="px-3 py-2.5">Last Seen</th>
+                <th className="px-3 py-2.5">Last Heartbeat</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-800/50">
               {filtered.map(d => (
-                <tr key={d.id} onClick={() => setDetail(d)} className={`cursor-pointer transition-colors ${detail?.id === d.id ? 'bg-slate-800' : 'hover:bg-slate-800/50'}`}>
+                <tr key={d.id} onClick={() => setDetailAndRef(d)}
+                  className={`cursor-pointer transition-colors ${detail?.id === d.id ? 'bg-slate-800' : 'hover:bg-slate-800/50'}`}>
                   <td className="px-3 py-2" onClick={e => e.stopPropagation()}>
                     <input type="checkbox" checked={selected.has(d.id)} onChange={() => toggleSelect(d.id)} className="accent-brand-500" />
                   </td>
@@ -160,7 +183,7 @@ export default function DevicesPage() {
                   <td className="px-3 py-2 font-medium text-white">{d.name || d.ip_address}</td>
                   <td className="px-3 py-2 text-slate-400 font-mono text-xs">{d.ip_address}:{d.port}</td>
                   <td className="px-3 py-2 text-slate-400">{d.model || '-'}</td>
-                  <td className="px-3 py-2 text-slate-500 text-xs">{d.firmware_version || '-'}</td>
+                  <td className="px-3 py-2 text-slate-400 text-xs">{d.firmware_version || '-'}</td>
                   <td className="px-3 py-2 text-slate-500 font-mono text-xs">{d.mac_address || '-'}</td>
                   <td className="px-3 py-2 text-xs">{d.credential_name ? <span className="text-emerald-400">{d.credential_name}</span> : <span className="text-red-400">None</span>}</td>
                   <td className="px-3 py-2 text-slate-500 text-xs">{d.last_heartbeat ? new Date(d.last_heartbeat).toLocaleString() : 'Never'}</td>
@@ -176,24 +199,38 @@ export default function DevicesPage() {
 
       {/* Detail panel */}
       {detail && (
-        <div className="w-80 border-l border-slate-800 bg-slate-900/80 overflow-auto flex flex-col">
+        <div className="w-80 border-l border-slate-800 bg-slate-900/80 overflow-auto flex flex-col flex-shrink-0">
           <div className="p-4 border-b border-slate-800 flex items-center justify-between">
-            <h2 className="text-sm font-semibold text-white">{detail.name || detail.ip_address}</h2>
-            <button onClick={() => setDetail(null)} className="text-slate-500 hover:text-white text-lg">&times;</button>
+            <h2 className="text-sm font-semibold text-white truncate mr-2">{detail.name || detail.ip_address}</h2>
+            <button onClick={() => setDetailAndRef(null)} className="text-slate-500 hover:text-white text-lg">&times;</button>
           </div>
           <div className="p-4 space-y-3 text-sm flex-1 overflow-auto">
+            {/* Status */}
             <div className="flex items-center gap-2">
-              <span className={`w-2.5 h-2.5 rounded-full ${STATUS_COLORS[detail.status]}`} />
-              <span className="text-slate-300 capitalize">{detail.status}</span>
+              <span className={`w-2.5 h-2.5 rounded-full ${STATUS_COLORS[detail.status]} animate-pulse`} />
+              <span className="text-slate-300 capitalize font-medium">{detail.status}</span>
             </div>
+
+            {/* Editable fields */}
+            <EditableField label="Name" value={detail.name} field="name" editing={editing} editValue={editValue}
+              onStart={startEdit} onChange={setEditValue} onSave={saveEdit} onCancel={cancelEdit} />
+            <EditableField label="IP Address" value={`${detail.ip_address}:${detail.port}`} field="ip_address" editing={editing} editValue={editValue}
+              onStart={(f) => startEdit(f, detail.ip_address)} onChange={setEditValue} onSave={async () => {
+                await ipc.updateDevice(detail.id, { ip_address: editValue });
+                setEditing(null); await load();
+              }} onCancel={cancelEdit} />
+
+            {/* Read-only fields */}
             {[
-              ['IP', `${detail.ip_address}:${detail.port}`],
-              ['Model', detail.model], ['Serial', detail.serial_number],
-              ['MAC', detail.mac_address], ['Firmware', detail.firmware_version],
-              ['Manufacturer', detail.manufacturer], ['HTTPS', detail.https_enabled ? 'Yes' : 'No'],
+              ['Model', detail.model],
+              ['Serial', detail.serial_number],
+              ['MAC', detail.mac_address],
+              ['Firmware', detail.firmware_version],
+              ['Manufacturer', detail.manufacturer],
+              ['HTTPS', detail.https_enabled ? 'Yes' : 'No'],
               ['DHCP', detail.dhcp_enabled ? 'Yes' : 'No'],
               ['Last Heartbeat', detail.last_heartbeat ? new Date(detail.last_heartbeat).toLocaleString() : 'Never'],
-              ['Group', detail.group_name], ['Notes', detail.notes],
+              ['Group', detail.group_name],
             ].map(([label, value]) => (
               <div key={label as string}>
                 <span className="text-xs text-slate-600 uppercase tracking-wide">{label}</span>
@@ -201,44 +238,75 @@ export default function DevicesPage() {
               </div>
             ))}
 
+            {/* Notes - editable */}
+            <EditableField label="Notes" value={detail.notes} field="notes" editing={editing} editValue={editValue}
+              onStart={startEdit} onChange={setEditValue} onSave={saveEdit} onCancel={cancelEdit} multiline />
+
             {/* Credential assignment */}
             <div className="pt-2 border-t border-slate-800">
               <span className="text-xs text-slate-600 uppercase tracking-wide">Credential</span>
-              <select
-                value={detail.credential_id || ''}
-                onChange={e => handleAssignCredential(detail.id, e.target.value)}
-                className="mt-1 w-full px-2 py-1.5 bg-slate-800 border border-slate-700 rounded text-sm text-white"
-              >
+              <select value={detail.credential_id || ''} onChange={e => handleAssignCredential(detail.id, e.target.value)}
+                className="mt-1 w-full px-2 py-1.5 bg-slate-800 border border-slate-700 rounded text-sm text-white">
                 <option value="">-- No credential --</option>
-                {credentials.map(c => (
-                  <option key={c.id} value={c.id}>{c.name} ({c.username})</option>
-                ))}
+                {credentials.map(c => <option key={c.id} value={c.id}>{c.name} ({c.username})</option>)}
               </select>
-              {!detail.credential_id && (
-                <p className="text-xs text-amber-400 mt-1">Assign a credential to test connection</p>
-              )}
+              {!detail.credential_id && <p className="text-xs text-amber-400 mt-1">Assign a credential to enable actions</p>}
             </div>
           </div>
 
-          <div className="p-4 border-t border-slate-800 space-y-2">
-            <button
-              onClick={() => handleTestConnection(detail.id)}
-              disabled={testing || !detail.credential_id}
-              className="w-full px-3 py-2 bg-blue-600 text-white text-xs rounded-lg hover:bg-blue-700 disabled:opacity-40 disabled:cursor-not-allowed"
-            >
-              {testing ? 'Testing...' : 'Test Connection'}
-            </button>
+          {/* Actions */}
+          <div className="p-4 border-t border-slate-800 space-y-2 flex-shrink-0">
+            <button onClick={() => handleTestConnection(detail.id)} disabled={testing || !detail.credential_id}
+              className="w-full px-3 py-2 bg-blue-600 text-white text-xs rounded-lg hover:bg-blue-700 disabled:opacity-40 disabled:cursor-not-allowed">
+              {testing ? 'Testing...' : 'Test Connection'}</button>
             <button onClick={() => ipc.openDoor(detail.id)} disabled={!detail.credential_id}
               className="w-full px-3 py-2 bg-emerald-600 text-white text-xs rounded-lg hover:bg-emerald-700 disabled:opacity-40 disabled:cursor-not-allowed">Open Door</button>
-            <button onClick={() => ipc.rebootDevice(detail.id)} disabled={!detail.credential_id}
+            <button onClick={() => { if (confirm('Reboot this device?')) ipc.rebootDevice(detail.id); }} disabled={!detail.credential_id}
               className="w-full px-3 py-2 bg-amber-600 text-white text-xs rounded-lg hover:bg-amber-700 disabled:opacity-40 disabled:cursor-not-allowed">Reboot</button>
             <button onClick={() => ipc.backupConfig(detail.id)} disabled={!detail.credential_id}
               className="w-full px-3 py-2 bg-slate-700 text-white text-xs rounded-lg hover:bg-slate-600 disabled:opacity-40 disabled:cursor-not-allowed">Backup Config</button>
             <button onClick={() => handleDelete(detail.id)}
-              className="w-full px-3 py-2 bg-red-700 text-white text-xs rounded-lg hover:bg-red-600">Delete Device</button>
+              className="w-full px-3 py-2 bg-red-700/60 text-red-200 text-xs rounded-lg hover:bg-red-700">Delete Device</button>
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+// ─── Editable field component ─────────────────────────────────────
+function EditableField({ label, value, field, editing, editValue, onStart, onChange, onSave, onCancel, multiline }: {
+  label: string; value: string; field: string; editing: string | null; editValue: string;
+  onStart: (field: string, value: string) => void; onChange: (v: string) => void;
+  onSave: () => void; onCancel: () => void; multiline?: boolean;
+}) {
+  if (editing === field) {
+    return (
+      <div>
+        <span className="text-xs text-slate-600 uppercase tracking-wide">{label}</span>
+        <div className="flex gap-1 mt-1">
+          {multiline ? (
+            <textarea value={editValue} onChange={e => onChange(e.target.value)} rows={3}
+              className="flex-1 px-2 py-1 bg-slate-800 border border-brand-500 rounded text-sm text-white" autoFocus />
+          ) : (
+            <input value={editValue} onChange={e => onChange(e.target.value)}
+              className="flex-1 px-2 py-1 bg-slate-800 border border-brand-500 rounded text-sm text-white" autoFocus
+              onKeyDown={e => { if (e.key === 'Enter') onSave(); if (e.key === 'Escape') onCancel(); }} />
+          )}
+          <button onClick={onSave} className="px-2 py-1 bg-emerald-600 text-white text-xs rounded">OK</button>
+          <button onClick={onCancel} className="px-2 py-1 bg-slate-700 text-white text-xs rounded">X</button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="group cursor-pointer" onClick={() => onStart(field, value || '')}>
+      <span className="text-xs text-slate-600 uppercase tracking-wide">{label}</span>
+      <div className="flex items-center gap-1">
+        <p className="text-slate-300 mt-0.5 flex-1">{value || '-'}</p>
+        <span className="text-xs text-slate-700 group-hover:text-brand-400 transition-colors">edit</span>
+      </div>
     </div>
   );
 }
