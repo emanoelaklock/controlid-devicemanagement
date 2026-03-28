@@ -1,5 +1,5 @@
 import cron from 'node-cron';
-import { getDb } from '../database';
+import { query, run } from '../utils/db-helpers';
 import { ControlIdService } from './controlid.service';
 import { decrypt } from '../utils/encryption';
 
@@ -16,17 +16,19 @@ export class DeviceMonitorService {
   }
 
   async checkAllDevices(): Promise<void> {
-    const db = getDb();
-    const devices = db.prepare('SELECT * FROM devices').all() as any[];
+    const devices = query('SELECT * FROM devices');
     for (const device of devices) {
       try {
         const api = new ControlIdService(device.ip_address, device.port, device.login, decrypt(device.password));
         const isOnline = await api.ping();
         const newStatus = isOnline ? 'ONLINE' : 'OFFLINE';
-        db.prepare(`UPDATE devices SET status = ?, last_heartbeat = CASE WHEN ? = 'ONLINE' THEN datetime('now') ELSE last_heartbeat END WHERE id = ?`)
-          .run(newStatus, newStatus, device.id);
+        if (isOnline) {
+          run("UPDATE devices SET status=?, last_heartbeat=datetime('now') WHERE id=?", [newStatus, device.id]);
+        } else {
+          run("UPDATE devices SET status=? WHERE id=?", [newStatus, device.id]);
+        }
       } catch {
-        db.prepare("UPDATE devices SET status = 'ERROR' WHERE id = ?").run(device.id);
+        run("UPDATE devices SET status='ERROR' WHERE id=?", [device.id]);
       }
     }
   }

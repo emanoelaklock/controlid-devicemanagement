@@ -2,7 +2,7 @@ import { Router } from 'express';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import { z } from 'zod';
-import { getDb } from '../database';
+import { queryOne } from '../utils/db-helpers';
 import { asyncHandler } from '../utils/asyncHandler';
 import { authenticate, AuthPayload } from '../middleware/auth';
 import { AppError } from '../middleware/errorHandler';
@@ -12,7 +12,7 @@ const loginSchema = z.object({ email: z.string().email(), password: z.string().m
 
 router.post('/login', asyncHandler(async (req, res) => {
   const { email, password } = loginSchema.parse(req.body);
-  const user = getDb().prepare('SELECT * FROM users WHERE email = ?').get(email) as any;
+  const user = queryOne('SELECT * FROM users WHERE email = ?', [email]);
   if (!user || !user.active) throw new AppError(401, 'Invalid credentials');
   const valid = await bcrypt.compare(password, user.password);
   if (!valid) throw new AppError(401, 'Invalid credentials');
@@ -22,7 +22,7 @@ router.post('/login', asyncHandler(async (req, res) => {
 }));
 
 router.get('/me', authenticate, asyncHandler(async (req, res) => {
-  const user = getDb().prepare('SELECT id, email, name, role FROM users WHERE id = ?').get(req.user!.userId) as any;
+  const user = queryOne('SELECT id, email, name, role FROM users WHERE id = ?', [req.user!.userId]);
   if (!user) throw new AppError(404, 'User not found');
   res.json(user);
 }));
