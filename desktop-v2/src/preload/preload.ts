@@ -12,7 +12,7 @@ contextBridge.exposeInMainWorld('api', {
       'devices:test-connection', 'devices:reboot', 'devices:open-door',
       'batch:reboot', 'batch:test-connection',
       'discovery:scan', 'discovery:cancel',
-      'credentials:list', 'credentials:create', 'credentials:update', 'credentials:delete',
+      'credentials:list', 'credentials:create', 'credentials:update', 'credentials:delete', 'credentials:set-default',
       'jobs:list', 'jobs:get', 'jobs:cancel',
       'audit:list',
       'groups:list', 'groups:create', 'groups:delete',

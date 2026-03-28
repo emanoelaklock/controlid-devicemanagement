@@ -150,14 +150,23 @@ export function registerIpcHandlers(getWindow: () => BrowserWindow | null): void
   // ─── Credentials ────────────────────────────────────────────────
 
   ipcMain.handle('credentials:list', () => {
-    return query('SELECT id, name, username, is_default, created_at, updated_at FROM credentials ORDER BY name');
+    return query('SELECT id, name, username, is_default, created_at, updated_at FROM credentials ORDER BY is_default DESC, name ASC');
   });
 
-  ipcMain.handle('credentials:create', (_e, { name, username, password }: any) => {
+  ipcMain.handle('credentials:create', (_e, { name, username, password, isDefault }: any) => {
     const id = uuid();
-    run(`INSERT INTO credentials (id, name, username, password) VALUES (?,?,?,?)`,
-      [id, name, username, encrypt(password)]);
+    // If setting as default, clear other defaults first
+    if (isDefault) {
+      run('UPDATE credentials SET is_default = 0 WHERE is_default = 1');
+    }
+    run(`INSERT INTO credentials (id, name, username, password, is_default) VALUES (?,?,?,?,?)`,
+      [id, name, username, encrypt(password), isDefault ? 1 : 0]);
     return queryOne('SELECT id, name, username, is_default, created_at FROM credentials WHERE id = ?', [id]);
+  });
+
+  ipcMain.handle('credentials:set-default', (_e, id: string) => {
+    run('UPDATE credentials SET is_default = 0 WHERE is_default = 1');
+    run('UPDATE credentials SET is_default = 1 WHERE id = ?', [id]);
   });
 
   ipcMain.handle('credentials:update', (_e, { id, data }: any) => {
