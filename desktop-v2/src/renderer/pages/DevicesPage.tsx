@@ -8,13 +8,18 @@ const STATUS_COLORS: Record<string, string> = {
 
 export default function DevicesPage() {
   const [devices, setDevices] = useState<any[]>([]);
+  const [credentials, setCredentials] = useState<any[]>([]);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [search, setSearch] = useState('');
   const [detail, setDetail] = useState<any>(null);
   const [showAdd, setShowAdd] = useState(false);
+  const [testing, setTesting] = useState(false);
   const [addForm, setAddForm] = useState({ name: '', ip_address: '', port: 80, manufacturer: 'controlid', model: '' });
 
-  const load = useCallback(() => { ipc.listDevices().then(setDevices); }, []);
+  const load = useCallback(() => {
+    ipc.listDevices().then(setDevices);
+    ipc.listCredentials().then(setCredentials);
+  }, []);
   useEffect(() => { load(); }, [load]);
 
   const filtered = devices.filter(d =>
@@ -36,7 +41,7 @@ export default function DevicesPage() {
   const handleAdd = async () => {
     await ipc.createDevice(addForm);
     setShowAdd(false);
-    setAddForm({ name: '', ip_address: '', port: 443, manufacturer: 'controlid', model: '' });
+    setAddForm({ name: '', ip_address: '', port: 80, manufacturer: 'controlid', model: '' });
     load();
   };
 
@@ -56,6 +61,30 @@ export default function DevicesPage() {
     if (!confirm('Delete this device?')) return;
     await ipc.deleteDevice(id);
     setDetail(null);
+    load();
+  };
+
+  const handleTestConnection = async (deviceId: string) => {
+    setTesting(true);
+    try {
+      const result = await ipc.testConnection(deviceId);
+      const updated = await ipc.getDevice(deviceId);
+      setDetail(updated);
+      load();
+      if (!result.connected) {
+        alert('Could not connect. Check credentials and port.');
+      }
+    } catch (err: any) {
+      alert(`Connection failed: ${err.message || err}`);
+    } finally {
+      setTesting(false);
+    }
+  };
+
+  const handleAssignCredential = async (deviceId: string, credentialId: string) => {
+    await ipc.updateDevice(deviceId, { credential_id: credentialId || null });
+    const updated = await ipc.getDevice(deviceId);
+    setDetail(updated);
     load();
   };
 
@@ -110,6 +139,7 @@ export default function DevicesPage() {
                 <th className="px-3 py-2.5">Model</th>
                 <th className="px-3 py-2.5">Firmware</th>
                 <th className="px-3 py-2.5">MAC Address</th>
+                <th className="px-3 py-2.5">Credential</th>
                 <th className="px-3 py-2.5">Last Seen</th>
               </tr>
             </thead>
@@ -125,11 +155,12 @@ export default function DevicesPage() {
                   <td className="px-3 py-2 text-slate-400">{d.model || '-'}</td>
                   <td className="px-3 py-2 text-slate-500 text-xs">{d.firmware_version || '-'}</td>
                   <td className="px-3 py-2 text-slate-500 font-mono text-xs">{d.mac_address || '-'}</td>
+                  <td className="px-3 py-2 text-xs">{d.credential_name ? <span className="text-emerald-400">{d.credential_name}</span> : <span className="text-red-400">None</span>}</td>
                   <td className="px-3 py-2 text-slate-500 text-xs">{d.last_heartbeat ? new Date(d.last_heartbeat).toLocaleString() : 'Never'}</td>
                 </tr>
               ))}
               {filtered.length === 0 && (
-                <tr><td colSpan={8} className="px-4 py-12 text-center text-slate-600">No devices found. Use Discovery to scan your network.</td></tr>
+                <tr><td colSpan={9} className="px-4 py-12 text-center text-slate-600">No devices found. Use Discovery to scan your network.</td></tr>
               )}
             </tbody>
           </table>
@@ -138,12 +169,12 @@ export default function DevicesPage() {
 
       {/* Detail panel */}
       {detail && (
-        <div className="w-80 border-l border-slate-800 bg-slate-900/80 overflow-auto">
+        <div className="w-80 border-l border-slate-800 bg-slate-900/80 overflow-auto flex flex-col">
           <div className="p-4 border-b border-slate-800 flex items-center justify-between">
             <h2 className="text-sm font-semibold text-white">{detail.name || detail.ip_address}</h2>
             <button onClick={() => setDetail(null)} className="text-slate-500 hover:text-white text-lg">&times;</button>
           </div>
-          <div className="p-4 space-y-3 text-sm">
+          <div className="p-4 space-y-3 text-sm flex-1 overflow-auto">
             <div className="flex items-center gap-2">
               <span className={`w-2.5 h-2.5 rounded-full ${STATUS_COLORS[detail.status]}`} />
               <span className="text-slate-300 capitalize">{detail.status}</span>
@@ -162,14 +193,42 @@ export default function DevicesPage() {
                 <p className="text-slate-300 mt-0.5">{(value as string) || '-'}</p>
               </div>
             ))}
+
+            {/* Credential assignment */}
+            <div className="pt-2 border-t border-slate-800">
+              <span className="text-xs text-slate-600 uppercase tracking-wide">Credential</span>
+              <select
+                value={detail.credential_id || ''}
+                onChange={e => handleAssignCredential(detail.id, e.target.value)}
+                className="mt-1 w-full px-2 py-1.5 bg-slate-800 border border-slate-700 rounded text-sm text-white"
+              >
+                <option value="">-- No credential --</option>
+                {credentials.map(c => (
+                  <option key={c.id} value={c.id}>{c.name} ({c.username})</option>
+                ))}
+              </select>
+              {!detail.credential_id && (
+                <p className="text-xs text-amber-400 mt-1">Assign a credential to test connection</p>
+              )}
+            </div>
           </div>
+
           <div className="p-4 border-t border-slate-800 space-y-2">
-            <button onClick={async () => { await ipc.testConnection(detail.id); load(); const d = await ipc.getDevice(detail.id); setDetail(d); }}
-              className="w-full px-3 py-2 bg-blue-600 text-white text-xs rounded-lg hover:bg-blue-700">Test Connection</button>
-            <button onClick={() => ipc.openDoor(detail.id)} className="w-full px-3 py-2 bg-emerald-600 text-white text-xs rounded-lg hover:bg-emerald-700">Open Door</button>
-            <button onClick={() => ipc.rebootDevice(detail.id)} className="w-full px-3 py-2 bg-amber-600 text-white text-xs rounded-lg hover:bg-amber-700">Reboot</button>
-            <button onClick={() => ipc.backupConfig(detail.id)} className="w-full px-3 py-2 bg-slate-700 text-white text-xs rounded-lg hover:bg-slate-600">Backup Config</button>
-            <button onClick={() => handleDelete(detail.id)} className="w-full px-3 py-2 bg-red-700 text-white text-xs rounded-lg hover:bg-red-600">Delete Device</button>
+            <button
+              onClick={() => handleTestConnection(detail.id)}
+              disabled={testing || !detail.credential_id}
+              className="w-full px-3 py-2 bg-blue-600 text-white text-xs rounded-lg hover:bg-blue-700 disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              {testing ? 'Testing...' : 'Test Connection'}
+            </button>
+            <button onClick={() => ipc.openDoor(detail.id)} disabled={!detail.credential_id}
+              className="w-full px-3 py-2 bg-emerald-600 text-white text-xs rounded-lg hover:bg-emerald-700 disabled:opacity-40 disabled:cursor-not-allowed">Open Door</button>
+            <button onClick={() => ipc.rebootDevice(detail.id)} disabled={!detail.credential_id}
+              className="w-full px-3 py-2 bg-amber-600 text-white text-xs rounded-lg hover:bg-amber-700 disabled:opacity-40 disabled:cursor-not-allowed">Reboot</button>
+            <button onClick={() => ipc.backupConfig(detail.id)} disabled={!detail.credential_id}
+              className="w-full px-3 py-2 bg-slate-700 text-white text-xs rounded-lg hover:bg-slate-600 disabled:opacity-40 disabled:cursor-not-allowed">Backup Config</button>
+            <button onClick={() => handleDelete(detail.id)}
+              className="w-full px-3 py-2 bg-red-700 text-white text-xs rounded-lg hover:bg-red-600">Delete Device</button>
           </div>
         </div>
       )}
