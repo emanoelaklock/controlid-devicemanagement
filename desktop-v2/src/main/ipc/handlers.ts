@@ -65,11 +65,17 @@ export function registerIpcHandlers(getWindow: () => BrowserWindow | null): void
     );
 
     if (info) {
+      console.log('[TestConnection] DeviceInfo returned:', JSON.stringify(info));
       run(`UPDATE devices SET status='online', firmware_version=?, model=?, serial_number=?,
         mac_address=?, last_heartbeat=datetime('now'), https_enabled=?, dhcp_enabled=?,
-        updated_at=datetime('now') WHERE id=?`,
+        hostname=?, updated_at=datetime('now') WHERE id=?`,
         [info.firmwareVersion, info.model, info.serialNumber, info.macAddress,
-         info.httpsEnabled ? 1 : 0, info.dhcpEnabled ? 1 : 0, id]);
+         info.httpsEnabled ? 1 : 0, info.dhcpEnabled ? 1 : 0, info.hostname, id]);
+
+      // Verify the update worked
+      const updated = queryOne('SELECT model, mac_address, dhcp_enabled, firmware_version FROM devices WHERE id=?', [id]);
+      console.log('[TestConnection] DB after update:', JSON.stringify(updated));
+
       return { connected: true, info };
     }
 

@@ -215,7 +215,10 @@ export class ControlIdAdapter implements DeviceAdapter {
 
     const net = info.network ?? {};
 
-    return {
+    console.log('[ControlID] buildDeviceInfo - info.network:', JSON.stringify(net));
+    console.log('[ControlID] buildDeviceInfo - net.mac:', net.mac, 'device_two_names:', info.device_two_names, 'net.dhcp_enabled:', net.dhcp_enabled);
+
+    const result = {
       manufacturer: 'controlid',
       model: info.device_two_names ?? info.device_name ?? info.model ?? info.product ?? 'Unknown',
       serialNumber: info.serial ?? info.serial_number ?? '',
@@ -225,6 +228,9 @@ export class ControlIdAdapter implements DeviceAdapter {
       httpsEnabled: !!(net.ssl_enabled ?? info.ssl_enabled ?? false),
       dhcpEnabled: !!(net.dhcp_enabled ?? info.dhcp_enabled ?? false),
     };
+
+    console.log('[ControlID] buildDeviceInfo result:', JSON.stringify(result));
+    return result;
   }
 
   private extractFromHtml(html: string, pattern: string): string | null {

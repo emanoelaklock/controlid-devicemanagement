@@ -44,7 +44,7 @@ app.whenReady().then(async () => {
     await initDatabase();
     registerIpcHandlers(() => mainWindow);
     createWindow();
-    heartbeatService.start(() => mainWindow, 10000); // Check every 10 seconds
+    heartbeatService.start(() => mainWindow, 5000); // Check every 5 seconds
   } catch (error) {
     console.error('Failed to start:', error);
     app.quit();
