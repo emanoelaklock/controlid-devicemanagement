@@ -35,12 +35,28 @@ export default function DevicesPage() {
 
   useEffect(() => {
     load();
-    // Heartbeat auto-refresh
-    const unsub = ipc.on('heartbeat:update', () => load());
-    // Also poll every 5 seconds as backup
-    const interval = setInterval(load, 5000);
-    return () => { unsub?.(); clearInterval(interval); };
-  }, [load]);
+    // Poll device list every 3 seconds to keep status in sync
+    const interval = setInterval(() => {
+      ipc.listDevices().then(devs => {
+        setDevices(devs);
+        if (detailRef.current) {
+          const updated = devs.find((d: any) => d.id === detailRef.current.id);
+          if (updated) { setDetail(updated); detailRef.current = updated; }
+        }
+      });
+    }, 3000);
+    // Also listen for heartbeat events
+    const unsub = ipc.on('heartbeat:update', () => {
+      ipc.listDevices().then(devs => {
+        setDevices(devs);
+        if (detailRef.current) {
+          const updated = devs.find((d: any) => d.id === detailRef.current.id);
+          if (updated) { setDetail(updated); detailRef.current = updated; }
+        }
+      });
+    });
+    return () => { clearInterval(interval); unsub?.(); };
+  }, []);
 
   const filtered = devices.filter(d =>
     !search || d.name?.toLowerCase().includes(search.toLowerCase()) ||

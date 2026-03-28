@@ -183,35 +183,47 @@ export class ControlIdAdapter implements DeviceAdapter {
   }
 
   private buildDiscovered(ip: string, port: number, proto: string, data: any, elapsed: number): DiscoveredDevice {
+    const net = data.network ?? {};
     return {
       ipAddress: ip, port,
-      macAddress: data.mac ?? null,
-      hostname: data.hostname ?? null,
+      macAddress: net.mac ?? data.mac ?? null,
+      hostname: net.device_hostname ?? data.device_hostname ?? null,
       manufacturer: 'controlid',
-      model: data.model ?? data.product ?? null,
+      model: data.device_two_names ?? data.device_name ?? data.model ?? null,
       serialNumber: data.serial ?? null,
-      firmwareVersion: data.firmware ?? data.version ?? null,
-      httpsEnabled: proto === 'https',
+      firmwareVersion: data.version ?? data.firmware ?? null,
+      httpsEnabled: !!(net.ssl_enabled ?? false),
       responseTimeMs: elapsed,
       alreadyManaged: false,
       existingDeviceId: null,
     };
   }
 
-  private buildDeviceInfo(info: any, proto: string, netConfig?: any): DeviceInfo {
+  private buildDeviceInfo(info: any, _proto: string, _netConfig?: any): DeviceInfo {
     if (!info) info = {};
-    const net = netConfig?.network ?? netConfig?.general?.network ?? netConfig ?? {};
+
+    // Actual iDFace Max API response structure (system_information.fcgi):
+    // info.network.mac = "FC:52:CE:92:D8:C4"
+    // info.network.ip = "192.168.1.160"
+    // info.network.dhcp_enabled = true
+    // info.network.ssl_enabled = false
+    // info.network.device_hostname = "CID-0X0700-000112"
+    // info.serial = "0X0700/00010F"
+    // info.version = "8.3.1"
+    // info.device_name = "iDFace"
+    // info.device_two_names = "iDFace Max"
+
+    const net = info.network ?? {};
 
     return {
       manufacturer: 'controlid',
-      model: info.model ?? info.product ?? info.device_name ?? info.name ?? 'Unknown',
-      serialNumber: info.serial ?? info.serial_number ?? info.serialNumber ?? '',
-      macAddress: info.mac ?? info.mac_address ?? info.macAddress ?? info.MAC
-        ?? net.mac ?? net.mac_address ?? net.MAC ?? null,
-      firmwareVersion: info.firmware ?? info.version ?? info.firmware_version ?? info.sw_version ?? 'Unknown',
-      hostname: info.hostname ?? info.host_name ?? info.device_id ?? net.hostname ?? null,
-      httpsEnabled: proto === 'https',
-      dhcpEnabled: !!(info.dhcp ?? info.dhcp_enabled ?? net.dhcp ?? net.DHCP ?? false),
+      model: info.device_two_names ?? info.device_name ?? info.model ?? info.product ?? 'Unknown',
+      serialNumber: info.serial ?? info.serial_number ?? '',
+      macAddress: net.mac ?? info.mac ?? info.mac_address ?? null,
+      firmwareVersion: info.version ?? info.firmware ?? 'Unknown',
+      hostname: net.device_hostname ?? info.device_hostname ?? info.hostname ?? null,
+      httpsEnabled: !!(net.ssl_enabled ?? info.ssl_enabled ?? false),
+      dhcpEnabled: !!(net.dhcp_enabled ?? info.dhcp_enabled ?? false),
     };
   }
 

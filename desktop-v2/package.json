@@ -7,7 +7,7 @@
   "license": "MIT",
   "scripts": {
     "dev": "concurrently \"npm run dev:main\" \"npm run dev:renderer\"",
-    "dev:main": "npx tsc -p tsconfig.main.json && electron .",
+    "dev:main": "npx tsc -p tsconfig.main.json && npm run build:renderer && electron .",
     "dev:renderer": "vite dev",
     "build:main": "npx tsc -p tsconfig.main.json",
     "build:renderer": "vite build",
