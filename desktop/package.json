@@ -48,11 +48,7 @@
     "directories": {
       "output": "release"
     },
-    "asar": true,
-    "asarUnpack": [
-      "node_modules/.prisma/**",
-      "node_modules/@prisma/**"
-    ],
+    "asar": false,
     "files": [
       "dist/**/*",
       "node_modules/**/*"
