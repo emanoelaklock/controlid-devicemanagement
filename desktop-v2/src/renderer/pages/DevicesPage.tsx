@@ -197,7 +197,10 @@ export default function DevicesPage() {
                   </td>
                   <td className="px-3 py-2"><span className={`inline-block w-2.5 h-2.5 rounded-full ${STATUS_COLORS[d.status] || 'bg-slate-500'}`} /></td>
                   <td className="px-3 py-2 font-medium text-white">{d.name || d.ip_address}</td>
-                  <td className="px-3 py-2 text-slate-400 font-mono text-xs">{d.ip_address}:{d.port}</td>
+                  <td className="px-3 py-2 font-mono text-xs" onClick={e => e.stopPropagation()}>
+                    <a href="#" onClick={e => { e.preventDefault(); window.api.invoke('shell:open-url', `http://${d.ip_address}:${d.port}`); }}
+                      className="text-brand-400 hover:text-brand-300 hover:underline">{d.ip_address}:{d.port}</a>
+                  </td>
                   <td className="px-3 py-2 text-slate-400">{d.model || '-'}</td>
                   <td className="px-3 py-2 text-slate-400 text-xs">{d.firmware_version || '-'}</td>
                   <td className="px-3 py-2 text-slate-500 font-mono text-xs">{d.mac_address || '-'}</td>
@@ -230,11 +233,26 @@ export default function DevicesPage() {
             {/* Editable fields */}
             <EditableField label="Name" value={detail.name} field="name" editing={editing} editValue={editValue}
               onStart={startEdit} onChange={setEditValue} onSave={saveEdit} onCancel={cancelEdit} />
-            <EditableField label="IP Address" value={`${detail.ip_address}:${detail.port}`} field="ip_address" editing={editing} editValue={editValue}
-              onStart={(f) => startEdit(f, detail.ip_address)} onChange={setEditValue} onSave={async () => {
-                await ipc.updateDevice(detail.id, { ip_address: editValue });
-                setEditing(null); await load();
-              }} onCancel={cancelEdit} />
+            <div>
+              <span className="text-xs text-slate-600 uppercase tracking-wide">IP Address</span>
+              <div className="flex items-center gap-2 mt-0.5">
+                <a href="#" onClick={e => { e.preventDefault(); window.api.invoke('shell:open-url', `http://${detail.ip_address}:${detail.port}`); }}
+                  className="text-brand-400 hover:text-brand-300 hover:underline font-mono text-sm">
+                  {detail.ip_address}:{detail.port}
+                </a>
+                <button onClick={() => startEdit('ip_address', detail.ip_address)}
+                  className="text-xs text-slate-700 hover:text-brand-400">edit</button>
+              </div>
+              {editing === 'ip_address' && (
+                <div className="flex gap-1 mt-1">
+                  <input value={editValue} onChange={e => setEditValue(e.target.value)}
+                    className="flex-1 px-2 py-1 bg-slate-800 border border-brand-500 rounded text-sm text-white" autoFocus
+                    onKeyDown={e => { if (e.key === 'Enter') { ipc.updateDevice(detail.id, { ip_address: editValue }).then(() => { setEditing(null); load(); }); } if (e.key === 'Escape') cancelEdit(); }} />
+                  <button onClick={() => { ipc.updateDevice(detail.id, { ip_address: editValue }).then(() => { setEditing(null); load(); }); }} className="px-2 py-1 bg-emerald-600 text-white text-xs rounded">OK</button>
+                  <button onClick={cancelEdit} className="px-2 py-1 bg-slate-700 text-white text-xs rounded">X</button>
+                </div>
+              )}
+            </div>
 
             {/* Read-only fields */}
             {[

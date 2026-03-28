@@ -18,6 +18,7 @@ contextBridge.exposeInMainWorld('api', {
       'groups:list', 'groups:create', 'groups:delete',
       'dashboard:stats',
       'config:backup', 'config:backups', 'config:restore',
+      'shell:open-url',
     ];
     if (!allowedChannels.includes(channel)) {
       throw new Error(`IPC channel not allowed: ${channel}`);

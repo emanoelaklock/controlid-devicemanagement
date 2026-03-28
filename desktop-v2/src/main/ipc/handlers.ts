@@ -1,4 +1,4 @@
-import { ipcMain, BrowserWindow } from 'electron';
+import { ipcMain, BrowserWindow, shell } from 'electron';
 import { v4 as uuid } from 'uuid';
 import { query, queryOne, run, count, insertAndReturn } from '../db/queries';
 import { discoveryService } from '../services/discovery.service';
@@ -252,5 +252,14 @@ export function registerIpcHandlers(getWindow: () => BrowserWindow | null): void
         [uuid(), 'config_restore', 'config', deviceId, device.name, `Restored from backup v${backup.version}`, 'warning']);
     }
     return ok;
+  });
+
+  // ─── Shell ─────────────────────────────────────────────────────
+
+  ipcMain.handle('shell:open-url', (_e, url: string) => {
+    // Only allow http/https URLs to prevent shell injection
+    if (url.startsWith('http://') || url.startsWith('https://')) {
+      shell.openExternal(url);
+    }
   });
 }
