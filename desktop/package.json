@@ -48,14 +48,14 @@
     "directories": {
       "output": "release"
     },
+    "asar": true,
+    "asarUnpack": [
+      "node_modules/.prisma/**",
+      "node_modules/@prisma/**"
+    ],
     "files": [
       "dist/**/*",
-      "node_modules/**/*",
-      "!node_modules/.prisma/client/*.node"
-    ],
-    "asarUnpack": [
-      "node_modules/.prisma/**/*",
-      "node_modules/@prisma/engines/**/*"
+      "node_modules/**/*"
     ],
     "extraResources": [
       {
@@ -66,10 +66,6 @@
       {
         "from": "../frontend/dist",
         "to": "frontend-dist"
-      },
-      {
-        "from": "node_modules/.prisma",
-        "to": "prisma-engines"
       }
     ],
     "win": {
