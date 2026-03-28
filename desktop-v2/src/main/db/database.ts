@@ -20,12 +20,20 @@ export function saveDb(): void {
 }
 
 export async function initDatabase(): Promise<void> {
-  const userDataPath = app.isPackaged ? app.getPath('userData') : path.join(__dirname, '..', '..');
+  // In dev: __dirname = <project>/dist/main, project root = __dirname/../../
+  // In prod: __dirname = <install>/resources/app/dist/main
+  const projectRoot = app.isPackaged
+    ? path.join(process.resourcesPath, 'app')
+    : path.resolve(__dirname, '..', '..');
+
+  const userDataPath = app.isPackaged ? app.getPath('userData') : projectRoot;
   _dbPath = path.join(userDataPath, 'controlid-dm.db');
 
   const wasmPath = app.isPackaged
     ? path.join(process.resourcesPath, 'sql-wasm.wasm')
-    : path.join(__dirname, '..', '..', 'node_modules', 'sql.js', 'dist', 'sql-wasm.wasm');
+    : path.join(projectRoot, 'node_modules', 'sql.js', 'dist', 'sql-wasm.wasm');
+
+  console.log('[DB] WASM path:', wasmPath, 'exists:', fs.existsSync(wasmPath));
 
   const SQL = await initSqlJs({ locateFile: () => wasmPath });
 
@@ -49,6 +57,29 @@ export async function initDatabase(): Promise<void> {
 }
 
 function createSchema(): void {
+  // Credentials MUST be created before devices (FK dependency)
+  _db.run(`
+    CREATE TABLE IF NOT EXISTS credentials (
+      id TEXT PRIMARY KEY NOT NULL,
+      name TEXT NOT NULL,
+      username TEXT NOT NULL DEFAULT 'admin',
+      password TEXT NOT NULL,
+      is_default INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    )
+  `);
+
+  _db.run(`
+    CREATE TABLE IF NOT EXISTS device_groups (
+      id TEXT PRIMARY KEY NOT NULL,
+      name TEXT NOT NULL,
+      parent_id TEXT,
+      color TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    )
+  `);
+
   _db.run(`
     CREATE TABLE IF NOT EXISTS devices (
       id TEXT PRIMARY KEY NOT NULL,
@@ -72,28 +103,6 @@ function createSchema(): void {
       dhcp_enabled INTEGER NOT NULL DEFAULT 0,
       created_at TEXT NOT NULL DEFAULT (datetime('now')),
       updated_at TEXT NOT NULL DEFAULT (datetime('now'))
-    )
-  `);
-
-  _db.run(`
-    CREATE TABLE IF NOT EXISTS credentials (
-      id TEXT PRIMARY KEY NOT NULL,
-      name TEXT NOT NULL,
-      username TEXT NOT NULL DEFAULT 'admin',
-      password TEXT NOT NULL,
-      is_default INTEGER NOT NULL DEFAULT 0,
-      created_at TEXT NOT NULL DEFAULT (datetime('now')),
-      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
-    )
-  `);
-
-  _db.run(`
-    CREATE TABLE IF NOT EXISTS device_groups (
-      id TEXT PRIMARY KEY NOT NULL,
-      name TEXT NOT NULL,
-      parent_id TEXT REFERENCES device_groups(id) ON DELETE SET NULL,
-      color TEXT,
-      created_at TEXT NOT NULL DEFAULT (datetime('now'))
     )
   `);
 

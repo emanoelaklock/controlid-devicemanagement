@@ -4,21 +4,38 @@ import { ipc } from '../hooks/useIpc';
 export default function CredentialsPage() {
   const [creds, setCreds] = useState<any[]>([]);
   const [showAdd, setShowAdd] = useState(false);
+  const [saving, setSaving] = useState(false);
   const [form, setForm] = useState({ name: '', username: 'admin', password: '' });
 
-  useEffect(() => { ipc.listCredentials().then(setCreds); }, []);
+  const load = () => ipc.listCredentials().then(setCreds).catch(err => console.error('Load credentials failed:', err));
+  useEffect(() => { load(); }, []);
 
   const handleAdd = async () => {
-    await ipc.createCredential(form);
-    setShowAdd(false);
-    setForm({ name: '', username: 'admin', password: '' });
-    ipc.listCredentials().then(setCreds);
+    if (!form.name.trim() || !form.password.trim()) {
+      alert('Name and password are required');
+      return;
+    }
+    setSaving(true);
+    try {
+      await ipc.createCredential({ name: form.name.trim(), username: form.username.trim(), password: form.password });
+      setShowAdd(false);
+      setForm({ name: '', username: 'admin', password: '' });
+      await load();
+    } catch (err: any) {
+      alert(`Error creating credential: ${err.message || err}`);
+    } finally {
+      setSaving(false);
+    }
   };
 
   const handleDelete = async (id: string) => {
     if (!confirm('Delete this credential?')) return;
-    await ipc.deleteCredential(id);
-    ipc.listCredentials().then(setCreds);
+    try {
+      await ipc.deleteCredential(id);
+      await load();
+    } catch (err: any) {
+      alert(`Error: ${err.message || err}`);
+    }
   };
 
   return (
@@ -47,7 +64,10 @@ export default function CredentialsPage() {
             <input type="password" value={form.password} onChange={e => setForm({...form, password: e.target.value})}
               className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-lg text-sm text-white" />
           </div>
-          <button onClick={handleAdd} className="px-5 py-2 bg-emerald-600 text-white text-sm rounded-lg hover:bg-emerald-700">Save</button>
+          <button onClick={handleAdd} disabled={saving}
+            className="px-5 py-2 bg-emerald-600 text-white text-sm rounded-lg hover:bg-emerald-700 disabled:opacity-50">
+            {saving ? 'Saving...' : 'Save'}
+          </button>
         </div>
       )}
 
