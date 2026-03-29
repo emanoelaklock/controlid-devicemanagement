@@ -85,48 +85,68 @@ export function registerIpcHandlers(getWindow: () => BrowserWindow | null): void
   });
 
   ipcMain.handle('devices:locate', async (_e, id: string) => {
-    const device = queryOne('SELECT * FROM devices WHERE id = ?', [id]);
+    const device = queryOne(`SELECT d.*, c.username, c.password as cred_password
+      FROM devices d LEFT JOIN credentials c ON d.credential_id = c.id WHERE d.id = ?`, [id]);
     if (!device) throw new Error('Device not found');
     if (!device.mac_address) throw new Error('No MAC address known. Run Test Connection first.');
 
     const subnet = device.ip_address.split('.').slice(0, 3).join('.');
-    const adapters = adapterRegistry.getAll();
     const targetMac = device.mac_address.toUpperCase();
+    const password = device.cred_password ? decrypt(device.cred_password) : '';
+    const username = device.username || 'admin';
 
     console.log(`[Locate] Scanning ${subnet}.* for MAC ${targetMac}...`);
 
-    // Scan subnet in parallel batches of 30
-    for (let batch = 0; batch < 254; batch += 30) {
+    // Step 1: Quick TCP scan to find which IPs respond
+    const net = require('net');
+    const liveIps: string[] = [];
+
+    for (let batch = 0; batch < 254; batch += 50) {
       const ips: string[] = [];
-      for (let i = batch + 1; i <= Math.min(batch + 30, 254); i++) {
-        ips.push(`${subnet}.${i}`);
+      for (let i = batch + 1; i <= Math.min(batch + 50, 254); i++) {
+        const ip = `${subnet}.${i}`;
+        if (ip !== device.ip_address) ips.push(ip);
       }
 
-      const results = await Promise.allSettled(
-        ips.map(async (ip) => {
-          for (const adapter of adapters) {
-            const found = await adapter.probe(ip, device.port, 2000);
-            if (found?.macAddress?.toUpperCase() === targetMac) return ip;
-          }
-          return null;
-        })
+      const tcpResults = await Promise.allSettled(
+        ips.map(ip => new Promise<string | null>((resolve) => {
+          const socket = new net.Socket();
+          socket.setTimeout(1500);
+          socket.on('connect', () => { socket.destroy(); resolve(ip); });
+          socket.on('error', () => { socket.destroy(); resolve(null); });
+          socket.on('timeout', () => { socket.destroy(); resolve(null); });
+          socket.connect(device.port, ip);
+        }))
       );
 
-      for (const result of results) {
-        if (result.status === 'fulfilled' && result.value) {
-          const newIp = result.value;
-          console.log(`[Locate] Found ${targetMac} at ${newIp}`);
-          const ts = nowLocal();
-          run(`UPDATE devices SET ip_address=?, status='online', last_heartbeat=?, updated_at=? WHERE id=?`,
-            [newIp, ts, ts, id]);
-          run(`INSERT INTO audit_logs (id, action, category, device_id, device_name, details, severity, created_at) VALUES (?,?,?,?,?,?,?,?)`,
-            [uuid(), 'ip_changed', 'device', id, device.name, `IP changed: ${device.ip_address} -> ${newIp} (located by MAC)`, 'warning', ts]);
-          return { found: true, oldIp: device.ip_address, newIp };
-        }
+      for (const r of tcpResults) {
+        if (r.status === 'fulfilled' && r.value) liveIps.push(r.value);
       }
     }
 
-    console.log(`[Locate] MAC ${targetMac} not found on subnet ${subnet}.*`);
+    console.log(`[Locate] Found ${liveIps.length} live IPs, checking for MAC match...`);
+
+    // Step 2: Authenticate with each live IP to get MAC
+    for (const ip of liveIps) {
+      try {
+        const adapter = adapterRegistry.getAll()[0];
+        if (!adapter) continue;
+        const info = await adapter.authenticate(ip, device.port, username, password);
+        console.log(`[Locate] ${ip} -> MAC: ${info?.macAddress}`);
+        if (info?.macAddress?.toUpperCase() === targetMac) {
+          console.log(`[Locate] MATCH! Found ${targetMac} at ${ip}`);
+          const ts = nowLocal();
+          run(`UPDATE devices SET ip_address=?, status='online', last_heartbeat=?, updated_at=?,
+            firmware_version=?, model=?, serial_number=?, mac_address=?, hostname=? WHERE id=?`,
+            [ip, ts, ts, info.firmwareVersion, info.model, info.serialNumber, info.macAddress, info.hostname, id]);
+          run(`INSERT INTO audit_logs (id, action, category, device_id, device_name, details, severity, created_at) VALUES (?,?,?,?,?,?,?,?)`,
+            [uuid(), 'ip_changed', 'device', id, device.name, `IP changed: ${device.ip_address} -> ${ip} (located by MAC)`, 'warning', ts]);
+          return { found: true, oldIp: device.ip_address, newIp: ip };
+        }
+      } catch { /* skip */ }
+    }
+
+    console.log(`[Locate] MAC ${targetMac} not found on ${liveIps.length} live IPs`);
     return { found: false };
   });
 
