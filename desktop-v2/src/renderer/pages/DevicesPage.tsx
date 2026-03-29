@@ -392,7 +392,13 @@ export default function DevicesPage() {
                   const result = await ipc.locateDevice(detail.id);
                   if (result.found) {
                     alert(`Device found at new IP: ${result.newIp} (was ${result.oldIp})`);
-                    await load();
+                    const devs = await ipc.listDevices();
+                    setDevices(devs);
+                    const updated = devs.find((d: any) => d.id === detail.id);
+                    if (updated) { setDetail(updated); detailRef.current = updated; }
+                    ipc.deviceHistory(detail.id, 90).then(setHistory).catch(() => {});
+                    ipc.listCredentials().then(setCredentials);
+                    ipc.listGroups().then(setGroups);
                   } else {
                     alert('Device not found on the subnet. It may be powered off or on a different network.');
                   }
