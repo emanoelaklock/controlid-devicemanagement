@@ -43,12 +43,12 @@ export class HeartbeatService {
           if (reachable) {
             this.offlineCounters.delete(device.id);
             if (device.status !== 'online') {
-              run(`UPDATE devices SET status='online', last_heartbeat=datetime('now'), updated_at=datetime('now') WHERE id=?`, [device.id]);
+              run(`UPDATE devices SET status='online', last_heartbeat=datetime('now','localtime'), updated_at=datetime('now','localtime') WHERE id=?`, [device.id]);
               // Log connection restored
               run(`INSERT INTO connection_history (id, device_id, event) VALUES (?, ?, 'online')`, [uuid(), device.id]);
               changed = true;
             } else {
-              run(`UPDATE devices SET last_heartbeat=datetime('now') WHERE id=?`, [device.id]);
+              run(`UPDATE devices SET last_heartbeat=datetime('now','localtime') WHERE id=?`, [device.id]);
             }
             return { id: device.id, status: 'online' };
           }
@@ -58,7 +58,7 @@ export class HeartbeatService {
           this.offlineCounters.set(device.id, offlineCount);
 
           if (device.status !== 'offline') {
-            run(`UPDATE devices SET status='offline', updated_at=datetime('now') WHERE id=?`, [device.id]);
+            run(`UPDATE devices SET status='offline', updated_at=datetime('now','localtime') WHERE id=?`, [device.id]);
             // Log connection lost
             run(`INSERT INTO connection_history (id, device_id, event) VALUES (?, ?, 'offline')`, [uuid(), device.id]);
             changed = true;
@@ -128,7 +128,7 @@ export class HeartbeatService {
         if (result.status === 'fulfilled' && result.value) {
           const newIp = result.value;
           console.log(`[Heartbeat] Found ${device.mac_address} at new IP: ${newIp} (was ${oldIp})`);
-          run(`UPDATE devices SET ip_address=?, status='online', last_heartbeat=datetime('now'), updated_at=datetime('now') WHERE id=?`,
+          run(`UPDATE devices SET ip_address=?, status='online', last_heartbeat=datetime('now','localtime'), updated_at=datetime('now','localtime') WHERE id=?`,
             [newIp, device.id]);
           run(`INSERT INTO audit_logs (id, action, category, device_id, device_name, details, severity) VALUES (?,?,?,?,?,?,?)`,
             [require('uuid').v4(), 'ip_changed', 'device', device.id, device.name,

@@ -65,8 +65,8 @@ function createSchema(): void {
       username TEXT NOT NULL DEFAULT 'admin',
       password TEXT NOT NULL,
       is_default INTEGER NOT NULL DEFAULT 0,
-      created_at TEXT NOT NULL DEFAULT (datetime('now')),
-      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+      created_at TEXT NOT NULL DEFAULT (datetime('now','localtime')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now','localtime'))
     )
   `);
 
@@ -76,7 +76,7 @@ function createSchema(): void {
       name TEXT NOT NULL,
       parent_id TEXT,
       color TEXT,
-      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+      created_at TEXT NOT NULL DEFAULT (datetime('now','localtime'))
     )
   `);
 
@@ -101,8 +101,8 @@ function createSchema(): void {
       notes TEXT,
       https_enabled INTEGER NOT NULL DEFAULT 0,
       dhcp_enabled INTEGER NOT NULL DEFAULT 0,
-      created_at TEXT NOT NULL DEFAULT (datetime('now')),
-      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+      created_at TEXT NOT NULL DEFAULT (datetime('now','localtime')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now','localtime'))
     )
   `);
 
@@ -116,7 +116,7 @@ function createSchema(): void {
       completed_items INTEGER NOT NULL DEFAULT 0,
       failed_items INTEGER NOT NULL DEFAULT 0,
       progress INTEGER NOT NULL DEFAULT 0,
-      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      created_at TEXT NOT NULL DEFAULT (datetime('now','localtime')),
       started_at TEXT,
       completed_at TEXT,
       cancelled_at TEXT,
@@ -145,7 +145,7 @@ function createSchema(): void {
       device_name TEXT,
       details TEXT,
       severity TEXT NOT NULL DEFAULT 'info',
-      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+      created_at TEXT NOT NULL DEFAULT (datetime('now','localtime'))
     )
   `);
 
@@ -156,8 +156,8 @@ function createSchema(): void {
       manufacturer TEXT NOT NULL,
       model TEXT,
       config TEXT NOT NULL DEFAULT '{}',
-      created_at TEXT NOT NULL DEFAULT (datetime('now')),
-      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+      created_at TEXT NOT NULL DEFAULT (datetime('now','localtime')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now','localtime'))
     )
   `);
 
@@ -168,7 +168,7 @@ function createSchema(): void {
       device_name TEXT NOT NULL,
       config TEXT NOT NULL DEFAULT '{}',
       version INTEGER NOT NULL DEFAULT 1,
-      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+      created_at TEXT NOT NULL DEFAULT (datetime('now','localtime'))
     )
   `);
 
@@ -182,8 +182,8 @@ function createSchema(): void {
       active INTEGER NOT NULL DEFAULT 1,
       group_name TEXT,
       notes TEXT,
-      created_at TEXT NOT NULL DEFAULT (datetime('now')),
-      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+      created_at TEXT NOT NULL DEFAULT (datetime('now','localtime')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now','localtime'))
     )
   `);
 
@@ -194,7 +194,7 @@ function createSchema(): void {
       device_id TEXT NOT NULL REFERENCES devices(id) ON DELETE CASCADE,
       synced INTEGER NOT NULL DEFAULT 0,
       synced_at TEXT,
-      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      created_at TEXT NOT NULL DEFAULT (datetime('now','localtime')),
       UNIQUE(person_id, device_id)
     )
   `);
@@ -204,7 +204,7 @@ function createSchema(): void {
       id TEXT PRIMARY KEY NOT NULL,
       device_id TEXT NOT NULL REFERENCES devices(id) ON DELETE CASCADE,
       event TEXT NOT NULL,
-      timestamp TEXT NOT NULL DEFAULT (datetime('now'))
+      timestamp TEXT NOT NULL DEFAULT (datetime('now','localtime'))
     )
   `);
 

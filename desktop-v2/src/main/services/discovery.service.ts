@@ -47,7 +47,7 @@ export class DiscoveryService {
 
     this.executeScan(jobId, allIps, request, scanState, window).catch(err => {
       console.error('[Discovery] Scan failed:', err);
-      run(`UPDATE jobs SET status='failed', completed_at=datetime('now') WHERE id=?`, [jobId]);
+      run(`UPDATE jobs SET status='failed', completed_at=datetime('now','localtime') WHERE id=?`, [jobId]);
     });
 
     return jobId;
@@ -57,7 +57,7 @@ export class DiscoveryService {
     const scan = this.activeScans.get(jobId);
     if (scan) {
       scan.cancelled = true;
-      run(`UPDATE jobs SET status='cancelled', cancelled_at=datetime('now') WHERE id=?`, [jobId]);
+      run(`UPDATE jobs SET status='cancelled', cancelled_at=datetime('now','localtime') WHERE id=?`, [jobId]);
     }
   }
 
@@ -186,7 +186,7 @@ export class DiscoveryService {
       await Promise.allSettled(promises);
     }
 
-    run(`UPDATE jobs SET status='completed', completed_at=datetime('now'), completed_items=?, progress=100 WHERE id=?`,
+    run(`UPDATE jobs SET status='completed', completed_at=datetime('now','localtime'), completed_items=?, progress=100 WHERE id=?`,
       [completed, jobId]);
 
     if (window && !window.isDestroyed()) {
