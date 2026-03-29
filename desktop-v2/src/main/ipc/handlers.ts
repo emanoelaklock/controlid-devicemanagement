@@ -517,21 +517,44 @@ export function registerIpcHandlers(getWindow: () => BrowserWindow | null): void
       JSON.stringify({ login: device.username || 'admin', password: conn_password }), 10000);
     if (!loginRes?.session) throw new Error('Authentication failed');
 
-    // Build network config matching Control iD API structure
+    // First read current network config to understand the API structure
+    const currentConfig = await adapter.httpRequest(proto, device.ip_address, device.port, '/get_configuration.fcgi',
+      '{}', 10000, loginRes.session);
+    console.log('[Network] Current get_configuration response:', JSON.stringify(currentConfig, null, 2));
+
+    // Also read system_information to see network fields
+    const sysInfo = await adapter.httpRequest(proto, device.ip_address, device.port, '/system_information.fcgi',
+      '{}', 10000, loginRes.session);
+    console.log('[Network] Current system_information.network:', JSON.stringify(sysInfo?.network, null, 2));
+
+    // Build network config - try the exact structure from system_information
     const netConfig: any = {};
-    if (network.dhcp !== undefined) netConfig.dhcp_enabled = network.dhcp;
-    if (!network.dhcp) {
-      if (network.ip) netConfig.ip = network.ip;
-      if (network.netmask) netConfig.netmask = network.netmask;
-      if (network.gateway) netConfig.gateway = network.gateway;
-      if (network.dns) netConfig.primary_dns = network.dns;
+    if (network.dhcp) {
+      netConfig.dhcp_enabled = true;
+    } else {
+      netConfig.dhcp_enabled = false;
+      netConfig.ip = network.ip;
+      netConfig.netmask = network.netmask;
+      netConfig.gateway = network.gateway;
+      if (sysInfo?.network?.primary_dns) netConfig.primary_dns = sysInfo.network.primary_dns;
     }
 
-    console.log('[Network] Sending config to device:', JSON.stringify({ network: netConfig }));
-
-    const result = await adapter.httpRequest(proto, device.ip_address, device.port, '/set_configuration.fcgi',
+    // Try Method 1: set_configuration with { network: { ... } }
+    console.log('[Network] Method 1 - set_configuration { network }:', JSON.stringify({ network: netConfig }));
+    const result1 = await adapter.httpRequest(proto, device.ip_address, device.port, '/set_configuration.fcgi',
       JSON.stringify({ network: netConfig }), 10000, loginRes.session);
-    console.log('[Network] set_configuration response:', JSON.stringify(result));
+    console.log('[Network] Method 1 response:', JSON.stringify(result1));
+
+    // Try Method 2: set_configuration with flat fields (some firmwares use this)
+    console.log('[Network] Method 2 - set_configuration flat:', JSON.stringify(netConfig));
+    const result2 = await adapter.httpRequest(proto, device.ip_address, device.port, '/set_configuration.fcgi',
+      JSON.stringify(netConfig), 10000, loginRes.session);
+    console.log('[Network] Method 2 response:', JSON.stringify(result2));
+
+    // Verify: read config again to check if it changed
+    const verifyInfo = await adapter.httpRequest(proto, device.ip_address, device.port, '/system_information.fcgi',
+      '{}', 10000, loginRes.session);
+    console.log('[Network] After set - network config:', JSON.stringify(verifyInfo?.network, null, 2));
 
     // Reboot device to apply network changes
     console.log('[Network] Rebooting device to apply changes...');
