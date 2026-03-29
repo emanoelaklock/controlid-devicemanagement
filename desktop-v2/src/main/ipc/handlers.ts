@@ -138,7 +138,7 @@ export function registerIpcHandlers(getWindow: () => BrowserWindow | null): void
           const ts = nowLocal();
           run(`UPDATE devices SET ip_address=?, status='online', last_heartbeat=?, updated_at=?,
             firmware_version=?, model=?, serial_number=?, mac_address=?, hostname=? WHERE id=?`,
-            [ip, ts, ts, info.firmwareVersion, info.model, info.serialNumber, info.macAddress, info.hostname, id]);
+            [ip, ts, ts, info!.firmwareVersion, info!.model, info!.serialNumber, info!.macAddress, info!.hostname, id]);
           run(`INSERT INTO audit_logs (id, action, category, device_id, device_name, details, severity, created_at) VALUES (?,?,?,?,?,?,?,?)`,
             [uuid(), 'ip_changed', 'device', id, device.name, `IP changed: ${device.ip_address} -> ${ip} (located by MAC)`, 'warning', ts]);
           return { found: true, oldIp: device.ip_address, newIp: ip };
