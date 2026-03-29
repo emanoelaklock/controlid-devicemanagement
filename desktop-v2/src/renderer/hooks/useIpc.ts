@@ -17,6 +17,7 @@ export const ipc = {
   updateDevice: (id: string, data: any) => window.api.invoke('devices:update', { id, data }),
   deleteDevice: (id: string) => window.api.invoke('devices:delete', id),
   testConnection: (id: string) => window.api.invoke('devices:test-connection', id),
+  locateDevice: (id: string) => window.api.invoke('devices:locate', id),
   rebootDevice: (id: string) => window.api.invoke('devices:reboot', id),
   openDoor: (deviceId: string, doorId?: number) => window.api.invoke('devices:open-door', { deviceId, doorId }),
   setTime: (id: string) => window.api.invoke('devices:set-time', id),

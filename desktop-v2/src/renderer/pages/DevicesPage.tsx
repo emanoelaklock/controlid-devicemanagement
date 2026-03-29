@@ -330,6 +330,24 @@ export default function DevicesPage() {
             <button onClick={() => handleTestConnection(detail.id)} disabled={testing || !detail.credential_id}
               className="w-full px-3 py-2 bg-blue-600 text-white text-xs rounded-lg hover:bg-blue-700 disabled:opacity-40 disabled:cursor-not-allowed">
               {testing ? 'Testing...' : 'Test Connection'}</button>
+            {(detail.status === 'offline' || detail.status === 'unreachable') && detail.mac_address && (
+              <button onClick={async () => {
+                setTesting(true);
+                try {
+                  const result = await ipc.locateDevice(detail.id);
+                  if (result.found) {
+                    alert(`Device found at new IP: ${result.newIp} (was ${result.oldIp})`);
+                    await load();
+                  } else {
+                    alert('Device not found on the subnet. It may be powered off or on a different network.');
+                  }
+                } catch (e: any) { alert(`Error: ${e.message}`); }
+                finally { setTesting(false); }
+              }} disabled={testing}
+                className="w-full px-3 py-2 bg-purple-600 text-white text-xs rounded-lg hover:bg-purple-700 disabled:opacity-40">
+                {testing ? 'Scanning...' : 'Locate Device (scan by MAC)'}
+              </button>
+            )}
             <button onClick={() => ipc.openDoor(detail.id)} disabled={!detail.credential_id}
               className="w-full px-3 py-2 bg-emerald-600 text-white text-xs rounded-lg hover:bg-emerald-700 disabled:opacity-40 disabled:cursor-not-allowed">Open Door</button>
             <button onClick={async () => { if (await ipc.confirm('Reboot this device?')) ipc.rebootDevice(detail.id); }} disabled={!detail.credential_id}

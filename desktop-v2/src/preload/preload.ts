@@ -9,7 +9,7 @@ contextBridge.exposeInMainWorld('api', {
   invoke: (channel: string, ...args: any[]) => {
     const allowedChannels = [
       'devices:list', 'devices:get', 'devices:create', 'devices:update', 'devices:delete',
-      'devices:test-connection', 'devices:reboot', 'devices:open-door', 'devices:set-network',
+      'devices:test-connection', 'devices:locate', 'devices:reboot', 'devices:open-door', 'devices:set-network',
       'devices:set-time', 'devices:factory-reset',
       'batch:reboot', 'batch:test-connection', 'batch:backup',
       'discovery:scan', 'discovery:cancel',

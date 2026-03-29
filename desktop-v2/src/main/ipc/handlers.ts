@@ -84,6 +84,52 @@ export function registerIpcHandlers(getWindow: () => BrowserWindow | null): void
     return { connected: false };
   });
 
+  ipcMain.handle('devices:locate', async (_e, id: string) => {
+    const device = queryOne('SELECT * FROM devices WHERE id = ?', [id]);
+    if (!device) throw new Error('Device not found');
+    if (!device.mac_address) throw new Error('No MAC address known. Run Test Connection first.');
+
+    const subnet = device.ip_address.split('.').slice(0, 3).join('.');
+    const adapters = adapterRegistry.getAll();
+    const targetMac = device.mac_address.toUpperCase();
+
+    console.log(`[Locate] Scanning ${subnet}.* for MAC ${targetMac}...`);
+
+    // Scan subnet in parallel batches of 30
+    for (let batch = 0; batch < 254; batch += 30) {
+      const ips: string[] = [];
+      for (let i = batch + 1; i <= Math.min(batch + 30, 254); i++) {
+        ips.push(`${subnet}.${i}`);
+      }
+
+      const results = await Promise.allSettled(
+        ips.map(async (ip) => {
+          for (const adapter of adapters) {
+            const found = await adapter.probe(ip, device.port, 2000);
+            if (found?.macAddress?.toUpperCase() === targetMac) return ip;
+          }
+          return null;
+        })
+      );
+
+      for (const result of results) {
+        if (result.status === 'fulfilled' && result.value) {
+          const newIp = result.value;
+          console.log(`[Locate] Found ${targetMac} at ${newIp}`);
+          const ts = nowLocal();
+          run(`UPDATE devices SET ip_address=?, status='online', last_heartbeat=?, updated_at=? WHERE id=?`,
+            [newIp, ts, ts, id]);
+          run(`INSERT INTO audit_logs (id, action, category, device_id, device_name, details, severity, created_at) VALUES (?,?,?,?,?,?,?,?)`,
+            [uuid(), 'ip_changed', 'device', id, device.name, `IP changed: ${device.ip_address} -> ${newIp} (located by MAC)`, 'warning', ts]);
+          return { found: true, oldIp: device.ip_address, newIp };
+        }
+      }
+    }
+
+    console.log(`[Locate] MAC ${targetMac} not found on subnet ${subnet}.*`);
+    return { found: false };
+  });
+
   ipcMain.handle('devices:reboot', async (_e, id: string) => {
     const device = queryOne(`SELECT d.*, c.username, c.password as cred_password
       FROM devices d LEFT JOIN credentials c ON d.credential_id = c.id WHERE d.id = ?`, [id]);
