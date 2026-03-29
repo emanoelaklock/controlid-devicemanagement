@@ -551,16 +551,92 @@ export function registerIpcHandlers(getWindow: () => BrowserWindow | null): void
     const device = queryOne(`SELECT d.*, c.username, c.password as cred_password
       FROM devices d LEFT JOIN credentials c ON d.credential_id = c.id WHERE d.id = ?`, [deviceId]);
     if (!device) throw new Error('Device not found');
-    const adapter = adapterRegistry.get(device.manufacturer);
-    if (!adapter) throw new Error('No adapter');
-    const conn: DeviceConnection = { ip: device.ip_address, port: device.port,
-      username: device.username || 'admin', password: device.cred_password ? decrypt(device.cred_password) : '' };
-    const config = await adapter.getConfig(conn);
+    const adapter = adapterRegistry.get(device.manufacturer) as any;
+    if (!adapter?.httpRequest) throw new Error('No adapter');
+    const proto = device.port === 443 ? 'https' : 'http';
+    const pw = device.cred_password ? decrypt(device.cred_password) : '';
+
+    // Login
+    const loginRes = await adapter.httpRequest(proto, device.ip_address, device.port, '/login.fcgi',
+      JSON.stringify({ login: device.username || 'admin', password: pw }), 10000);
+    if (!loginRes?.session) throw new Error('Authentication failed');
+    const s = loginRes.session;
+
+    // Read all configuration sections from the iDFace Max
+    const readObj = async (object: string) => {
+      try {
+        const res = await adapter.httpRequest(proto, device.ip_address, device.port, '/load_objects.fcgi',
+          JSON.stringify({ object }), 10000, s);
+        return res;
+      } catch { return null; }
+    };
+
+    const readConfig = async () => {
+      try {
+        return await adapter.httpRequest(proto, device.ip_address, device.port, '/get_configuration.fcgi', '{}', 10000, s);
+      } catch { return null; }
+    };
+
+    // Collect configuration sections
+    const config: Record<string, any> = {};
+
+    // Configurações Faciais => Configurações Gerais
+    const sysInfo = await adapter.httpRequest(proto, device.ip_address, device.port, '/system_information.fcgi', '{}', 10000, s);
+    config.system_information = sysInfo;
+
+    // General configuration (includes face settings, access settings, system settings, screen)
+    const generalConfig = await readConfig();
+    config.general_configuration = generalConfig;
+
+    // Load specific objects
+    const objects = [
+      'face_settings',        // Configurações Faciais
+      'access_rules',         // Acesso => regras
+      'time_zones',           // Zonas de tempo
+      'messages',             // Acesso => Mensagens
+      'identification_rules', // Acesso => Identificação
+      'relay_rules',          // MAE / Relés e GPIOs
+      'gpio',                 // GPIOs
+      'screen_settings',      // Configurações => Tela
+      'system_settings',      // Configurações => Sistema
+      'biometric_settings',   // Biometria
+      'door_settings',        // Configurações de porta
+      'alarm_settings',       // Alarmes
+    ];
+
+    for (const obj of objects) {
+      const data = await readObj(obj);
+      if (data) config[obj] = data;
+    }
+
+    // Also try direct configuration endpoints
+    const configEndpoints = [
+      '/get_face_config.fcgi',
+      '/get_access_config.fcgi',
+      '/get_relay_config.fcgi',
+      '/get_screen_config.fcgi',
+    ];
+
+    for (const endpoint of configEndpoints) {
+      try {
+        const data = await adapter.httpRequest(proto, device.ip_address, device.port, endpoint, '{}', 10000, s);
+        if (data && Object.keys(data).length > 0) {
+          config[endpoint.replace('/get_', '').replace('.fcgi', '')] = data;
+        }
+      } catch { /* skip */ }
+    }
+
+    await adapter.httpRequest(proto, device.ip_address, device.port, '/logout.fcgi', '{}', 5000, s).catch(() => {});
+
+    console.log('[Template] Captured config sections:', Object.keys(config).filter(k => config[k] && Object.keys(config[k]).length > 0));
+    console.log('[Template] Full config:', JSON.stringify(config, null, 2));
+
     const id = uuid();
     run(`INSERT INTO config_templates (id, name, manufacturer, model, config) VALUES (?,?,?,?,?)`,
       [id, templateName, device.manufacturer, device.model, JSON.stringify(config)]);
-    run(`INSERT INTO audit_logs (id, action, category, device_id, device_name, details, severity) VALUES (?,?,?,?,?,?,?)`,
-      [uuid(), 'template_created', 'config', deviceId, device.name, `Template "${templateName}" from ${device.name}`, 'info']);
+    const ts = nowLocal();
+    run(`INSERT INTO audit_logs (id, action, category, device_id, device_name, details, severity, created_at) VALUES (?,?,?,?,?,?,?,?)`,
+      [uuid(), 'template_created', 'config', deviceId, device.name, `Template "${templateName}" from ${device.name}`, 'info', ts]);
     return queryOne('SELECT * FROM config_templates WHERE id = ?', [id]);
   });
 
@@ -585,14 +661,58 @@ export function registerIpcHandlers(getWindow: () => BrowserWindow | null): void
     const config = JSON.parse(template.config);
     return jobService.createJob('batch_config', `Apply template "${template.name}" to ${deviceIds.length} devices`, deviceIds,
       async (conn, device) => {
-        const adapter = adapterRegistry.get(device.manufacturer);
-        if (!adapter) throw new Error('No adapter');
-        if (device.manufacturer !== template.manufacturer) throw new Error(`Manufacturer mismatch: device is ${device.manufacturer}, template is ${template.manufacturer}`);
-        const ok = await adapter.setConfig(conn, config);
-        if (!ok) throw new Error('Failed to apply configuration');
-        run(`INSERT INTO audit_logs (id, action, category, device_id, device_name, details, severity) VALUES (?,?,?,?,?,?,?)`,
-          [uuid(), 'template_applied', 'config', device.id, device.name, `Template "${template.name}" applied`, 'info']);
-        return `Template "${template.name}" applied successfully`;
+        const adapter = adapterRegistry.get(device.manufacturer) as any;
+        if (!adapter?.httpRequest) throw new Error('No adapter');
+        if (device.manufacturer !== template.manufacturer) throw new Error(`Manufacturer mismatch`);
+        const proto = device.port === 443 ? 'https' : 'http';
+        const loginRes = await adapter.httpRequest(proto, device.ip_address, device.port, '/login.fcgi',
+          JSON.stringify({ login: conn.username, password: conn.password }), 10000);
+        if (!loginRes?.session) throw new Error('Auth failed');
+        const s = loginRes.session;
+
+        let applied = 0;
+
+        // Apply general configuration
+        if (config.general_configuration && Object.keys(config.general_configuration).length > 0) {
+          await adapter.httpRequest(proto, device.ip_address, device.port, '/set_configuration.fcgi',
+            JSON.stringify(config.general_configuration), 10000, s).catch(() => {});
+          applied++;
+        }
+
+        // Apply specific config endpoints
+        const setEndpoints: Record<string, string> = {
+          face_config: '/set_face_config.fcgi',
+          access_config: '/set_access_config.fcgi',
+          relay_config: '/set_relay_config.fcgi',
+          screen_config: '/set_screen_config.fcgi',
+        };
+
+        for (const [key, endpoint] of Object.entries(setEndpoints)) {
+          if (config[key] && Object.keys(config[key]).length > 0) {
+            await adapter.httpRequest(proto, device.ip_address, device.port, endpoint,
+              JSON.stringify(config[key]), 10000, s).catch(() => {});
+            applied++;
+          }
+        }
+
+        // Apply objects via create_objects.fcgi (access_rules, time_zones, etc)
+        const objectTypes = ['access_rules', 'time_zones', 'messages', 'identification_rules', 'relay_rules', 'door_settings', 'alarm_settings'];
+        for (const objType of objectTypes) {
+          if (config[objType] && Array.isArray(config[objType])) {
+            for (const item of config[objType]) {
+              await adapter.httpRequest(proto, device.ip_address, device.port, '/create_objects.fcgi',
+                JSON.stringify({ object: objType, values: [item] }), 10000, s).catch(() => {});
+            }
+            applied++;
+          }
+        }
+
+        await adapter.httpRequest(proto, device.ip_address, device.port, '/logout.fcgi', '{}', 5000, s).catch(() => {});
+
+        const ts = nowLocal();
+        run(`INSERT INTO audit_logs (id, action, category, device_id, device_name, details, severity, created_at) VALUES (?,?,?,?,?,?,?,?)`,
+          [uuid(), 'template_applied', 'config', device.id, device.name, `Template "${template.name}" applied (${applied} sections)`, 'info', ts]);
+        return `Template applied (${applied} sections)`;
       }, getWindow());
   });
 
