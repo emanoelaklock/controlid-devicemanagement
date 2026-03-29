@@ -80,18 +80,15 @@ export default function DevicesPage() {
   };
 
   const handleAdd = async () => {
-    if (!addForm.ip_address) return alert('IP Address is required');
-    await ipc.createDevice({
-      ...addForm,
-      name: addForm.name || addForm.ip_address,
-    });
+    if (!addForm.ip_address) return;
+    await ipc.createDevice({ ...addForm, name: addForm.name || addForm.ip_address });
     setShowAdd(false);
     setAddForm({ name: '', ip_address: '', port: 80, manufacturer: 'controlid', model: '' });
     load();
   };
 
   const handleBatchReboot = async () => {
-    if (!confirm(`Reboot ${selected.size} device(s)?`)) return;
+    if (!(await ipc.confirm(`Reboot ${selected.size} device(s)?`))) return;
     await ipc.batchReboot(Array.from(selected));
     setSelected(new Set());
   };
@@ -103,7 +100,7 @@ export default function DevicesPage() {
   };
 
   const handleDelete = async (id: string) => {
-    if (!confirm('Delete this device?')) return;
+    if (!(await ipc.confirm('Delete this device?'))) return;
     await ipc.deleteDevice(id);
     setDetailAndRef(null);
     load();
@@ -114,9 +111,9 @@ export default function DevicesPage() {
     try {
       const result = await ipc.testConnection(deviceId);
       await load();
-      if (!result.connected) alert('Could not connect. Check credentials and port.');
+      if (!result.connected) await ipc.confirm('Could not connect. Check credentials and port.');
     } catch (err: any) {
-      alert(`Connection failed: ${err.message || err}`);
+      await ipc.confirm(`Connection failed: ${err.message || err}`);
     } finally {
       setTesting(false);
     }
@@ -289,17 +286,19 @@ export default function DevicesPage() {
                 <span className="text-xs text-slate-600 uppercase tracking-wide">Network Config</span>
                 <div className="flex gap-2 mt-2">
                   <button onClick={async () => {
-                    if (!confirm('Switch to DHCP? Device IP may change.')) return;
-                    try { await ipc.setNetwork(detail.id, { dhcp: true }); await load(); alert('DHCP enabled'); } catch (e: any) { alert(e.message); }
+                    if (!(await ipc.confirm('Switch to DHCP? Device IP may change.'))) return;
+                    try { await ipc.setNetwork(detail.id, { dhcp: true }); await load(); } catch (e: any) { await ipc.confirm(`Error: ${e.message}`); }
                   }} className={`flex-1 px-2 py-1.5 text-xs rounded ${detail.dhcp_enabled ? 'bg-emerald-600 text-white' : 'bg-slate-700 text-slate-300'}`}>
                     DHCP
                   </button>
                   <button onClick={async () => {
-                    const ip = prompt('Static IP:', detail.ip_address);
+                    const ip = await ipc.prompt('Static IP', 'Enter the new IP address:', detail.ip_address);
                     if (!ip) return;
-                    const netmask = prompt('Netmask:', '255.255.255.0');
-                    const gateway = prompt('Gateway:', detail.ip_address.split('.').slice(0, 3).join('.') + '.1');
-                    try { await ipc.setNetwork(detail.id, { dhcp: false, ip, netmask, gateway }); await load(); alert('Static IP set'); } catch (e: any) { alert(e.message); }
+                    const netmask = await ipc.prompt('Netmask', 'Enter subnet mask:', '255.255.255.0');
+                    if (!netmask) return;
+                    const gateway = await ipc.prompt('Gateway', 'Enter gateway:', detail.ip_address.split('.').slice(0, 3).join('.') + '.1');
+                    if (!gateway) return;
+                    try { await ipc.setNetwork(detail.id, { dhcp: false, ip, netmask, gateway }); await load(); } catch (e: any) { await ipc.confirm(`Error: ${e.message}`); }
                   }} className={`flex-1 px-2 py-1.5 text-xs rounded ${!detail.dhcp_enabled ? 'bg-blue-600 text-white' : 'bg-slate-700 text-slate-300'}`}>
                     Static IP
                   </button>
@@ -316,9 +315,9 @@ export default function DevicesPage() {
                   <option value="">-- No group --</option>
                   {groups.map(g => <option key={g.id} value={g.id}>{g.name}</option>)}
                 </select>
-                <button onClick={() => {
-                  const name = prompt('New group name:');
-                  if (name) ipc.createGroup({ name }).then(() => load());
+                <button onClick={async () => {
+                  const name = await ipc.prompt('New Group', 'Enter group name:');
+                  if (name) { await ipc.createGroup({ name }); load(); }
                 }} className="px-2 py-1.5 bg-slate-700 text-white text-xs rounded hover:bg-slate-600">+</button>
               </div>
             </div>
@@ -342,14 +341,14 @@ export default function DevicesPage() {
               {testing ? 'Testing...' : 'Test Connection'}</button>
             <button onClick={() => ipc.openDoor(detail.id)} disabled={!detail.credential_id}
               className="w-full px-3 py-2 bg-emerald-600 text-white text-xs rounded-lg hover:bg-emerald-700 disabled:opacity-40 disabled:cursor-not-allowed">Open Door</button>
-            <button onClick={() => { if (confirm('Reboot this device?')) ipc.rebootDevice(detail.id); }} disabled={!detail.credential_id}
+            <button onClick={async () => { if (await ipc.confirm('Reboot this device?')) ipc.rebootDevice(detail.id); }} disabled={!detail.credential_id}
               className="w-full px-3 py-2 bg-amber-600 text-white text-xs rounded-lg hover:bg-amber-700 disabled:opacity-40 disabled:cursor-not-allowed">Reboot</button>
             <button onClick={() => ipc.backupConfig(detail.id)} disabled={!detail.credential_id}
               className="w-full px-3 py-2 bg-slate-700 text-white text-xs rounded-lg hover:bg-slate-600 disabled:opacity-40 disabled:cursor-not-allowed">Backup Config</button>
             <button onClick={async () => {
-              const name = prompt('Template name:', `${detail.model || 'Device'} Config`);
+              const name = await ipc.prompt('Save as Template', 'Enter template name:', `${detail.model || 'Device'} Config`);
               if (!name) return;
-              try { await ipc.createTemplateFromDevice(detail.id, name); alert(`Template "${name}" created`); } catch (e: any) { alert(e.message); }
+              try { await ipc.createTemplateFromDevice(detail.id, name); await ipc.confirm(`Template "${name}" created successfully.`); } catch (e: any) { await ipc.confirm(`Error: ${e.message}`); }
             }} disabled={!detail.credential_id}
               className="w-full px-3 py-2 bg-slate-700 text-white text-xs rounded-lg hover:bg-slate-600 disabled:opacity-40 disabled:cursor-not-allowed">Save as Template</button>
             <button onClick={() => handleDelete(detail.id)}

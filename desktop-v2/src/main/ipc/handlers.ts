@@ -544,13 +544,57 @@ export function registerIpcHandlers(getWindow: () => BrowserWindow | null): void
     return true;
   });
 
-  // ─── Shell ─────────────────────────────────────────────────────
+  // ─── Shell & Dialogs ────────────────────────────────────────────
 
   ipcMain.handle('shell:open-url', (_e, url: string) => {
-    // Only allow http/https URLs to prevent shell injection
     if (url.startsWith('http://') || url.startsWith('https://')) {
       shell.openExternal(url);
     }
+  });
+
+  ipcMain.handle('dialog:prompt', async (_e, { title, message, defaultValue }: any) => {
+    const win = getWindow();
+    if (!win) return null;
+    // Use a simple input dialog via BrowserWindow
+    return new Promise<string | null>((resolve) => {
+      const prompt = new BrowserWindow({
+        width: 450, height: 200, parent: win, modal: true,
+        resizable: false, minimizable: false, maximizable: false,
+        autoHideMenuBar: true,
+        webPreferences: { nodeIntegration: true, contextIsolation: false },
+      });
+      const html = `<!DOCTYPE html><html><head><style>
+        body{font-family:system-ui;background:#1e293b;color:#e2e8f0;padding:20px;margin:0}
+        input{width:100%;padding:8px;margin:10px 0;background:#0f172a;border:1px solid #334155;border-radius:6px;color:#fff;font-size:14px;box-sizing:border-box}
+        .btns{display:flex;gap:8px;justify-content:flex-end;margin-top:12px}
+        button{padding:6px 16px;border:none;border-radius:6px;cursor:pointer;font-size:13px}
+        .ok{background:#4f46e5;color:#fff} .cancel{background:#334155;color:#94a3b8}
+        </style></head><body>
+        <p style="font-size:14px;margin:0 0 4px">${title || 'Input'}</p>
+        <p style="font-size:12px;color:#94a3b8;margin:0 0 8px">${message || ''}</p>
+        <input id="v" value="${(defaultValue || '').replace(/"/g, '&quot;')}" autofocus />
+        <div class="btns">
+          <button class="cancel" onclick="require('electron').ipcRenderer.send('prompt-result',null);window.close()">Cancel</button>
+          <button class="ok" onclick="require('electron').ipcRenderer.send('prompt-result',document.getElementById('v').value);window.close()">OK</button>
+        </div>
+        <script>document.getElementById('v').addEventListener('keydown',e=>{if(e.key==='Enter'){require('electron').ipcRenderer.send('prompt-result',document.getElementById('v').value);window.close()}if(e.key==='Escape'){require('electron').ipcRenderer.send('prompt-result',null);window.close()}})</script>
+        </body></html>`;
+      prompt.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`);
+      const { ipcMain: ipc2 } = require('electron');
+      const handler = (_: any, val: string | null) => { resolve(val); prompt.close(); ipc2.removeListener('prompt-result', handler); };
+      ipc2.on('prompt-result', handler);
+      prompt.on('closed', () => { ipc2.removeListener('prompt-result', handler); resolve(null); });
+    });
+  });
+
+  ipcMain.handle('dialog:confirm', async (_e, message: string) => {
+    const win = getWindow();
+    if (!win) return false;
+    const result = await dialog.showMessageBox(win, {
+      type: 'question', buttons: ['Cancel', 'OK'], defaultId: 1,
+      title: 'Confirm', message,
+    });
+    return result.response === 1;
   });
 
   // ─── Export ────────────────────────────────────────────────────

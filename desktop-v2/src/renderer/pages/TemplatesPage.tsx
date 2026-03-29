@@ -15,9 +15,9 @@ export default function TemplatesPage() {
   useEffect(() => { load(); }, []);
 
   const handleCreateFromDevice = async () => {
-    const deviceId = prompt('Enter device ID or select from Devices page');
+    const deviceId = await ipc.prompt('Create Template', 'Enter device ID (go to Devices → click device → copy ID)');
     if (!deviceId) return;
-    const name = prompt('Template name:');
+    const name = await ipc.prompt('Template Name', 'Enter a name for this template:');
     if (!name) return;
     try {
       await ipc.createTemplateFromDevice(deviceId, name);

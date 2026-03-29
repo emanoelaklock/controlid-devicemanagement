@@ -22,7 +22,7 @@ contextBridge.exposeInMainWorld('api', {
       'config:backup', 'config:backups', 'config:restore',
       'templates:list', 'templates:create-from-device', 'templates:create', 'templates:delete', 'templates:get', 'templates:apply',
       'firmware:summary', 'firmware:check-all',
-      'shell:open-url',
+      'shell:open-url', 'dialog:prompt', 'dialog:confirm',
       'export:devices-csv', 'export:audit-csv',
     ];
     if (!allowedChannels.includes(channel)) {

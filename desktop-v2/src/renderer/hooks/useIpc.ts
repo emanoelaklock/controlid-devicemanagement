@@ -84,6 +84,12 @@ export const ipc = {
   exportDevicesCsv: () => window.api.invoke('export:devices-csv'),
   exportAuditCsv: () => window.api.invoke('export:audit-csv'),
 
+  // Dialogs (prompt/confirm don't work in Electron with contextIsolation)
+  prompt: (title: string, message: string, defaultValue?: string): Promise<string | null> =>
+    window.api.invoke('dialog:prompt', { title, message, defaultValue }),
+  confirm: (message: string): Promise<boolean> =>
+    window.api.invoke('dialog:confirm', message),
+
   // Events - must be lazy to ensure window.api is available
   on: (channel: string, callback: (...args: any[]) => void) => {
     if (window?.api?.on) return window.api.on(channel, callback);
