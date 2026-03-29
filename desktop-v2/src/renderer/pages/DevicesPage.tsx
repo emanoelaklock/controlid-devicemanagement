@@ -222,6 +222,15 @@ export default function DevicesPage() {
           <button onClick={() => ipc.exportDevicesCsv()} className="px-3 py-1.5 bg-slate-700 text-white text-xs rounded-lg hover:bg-slate-600">
             Export CSV
           </button>
+          <button onClick={async () => {
+            const allIds = devices.filter(d => d.credential_id).map((d: any) => d.id);
+            if (allIds.length === 0) { await ipc.confirm('No devices with credentials to refresh.'); return; }
+            await ipc.batchTestConnection(allIds);
+            await ipc.confirm(`Refreshing ${allIds.length} devices... Check Tasks for progress.`);
+            setTimeout(refreshAll, 3000);
+          }} className="px-3 py-1.5 bg-teal-600 text-white text-xs rounded-lg hover:bg-teal-700">
+            Refresh Devices
+          </button>
           <button onClick={() => setShowAdd(!showAdd)} className="px-3 py-1.5 bg-brand-600 text-white text-xs rounded-lg hover:bg-brand-700">
             {showAdd ? 'Cancel' : '+ Add Device'}
           </button>
@@ -397,7 +406,7 @@ export default function DevicesPage() {
                 try {
                   const result = await ipc.locateDevice(detail.id);
                   if (result.found) {
-                    alert(`Device found at new IP: ${result.newIp} (was ${result.oldIp})`);
+                    await ipc.confirm(`Device found at new IP: ${result.newIp} (was ${result.oldIp})`);
                     const devs = await ipc.listDevices();
                     setDevices(devs);
                     const updated = devs.find((d: any) => d.id === detail.id);
@@ -406,9 +415,9 @@ export default function DevicesPage() {
                     ipc.listCredentials().then(setCredentials);
                     ipc.listGroups().then(setGroups);
                   } else {
-                    alert('Device not found on the subnet. It may be powered off or on a different network.');
+                    await ipc.confirm('Device not found on the subnet. It may be powered off or on a different network.');
                   }
-                } catch (e: any) { alert(`Error: ${e.message}`); }
+                } catch (e: any) { await ipc.confirm(`Error: ${e.message}`); }
                 finally { setTesting(false); }
               }} disabled={testing}
                 className="w-full px-3 py-2 bg-purple-600 text-white text-xs rounded-lg hover:bg-purple-700 disabled:opacity-40">
@@ -420,7 +429,7 @@ export default function DevicesPage() {
             <button onClick={async () => { if (await ipc.confirm('Reboot this device?')) ipc.rebootDevice(detail.id); }} disabled={!detail.credential_id}
               className="w-full px-3 py-2 bg-amber-600 text-white text-xs rounded-lg hover:bg-amber-700 disabled:opacity-40 disabled:cursor-not-allowed">Reboot</button>
             <button onClick={async () => {
-              try { await ipc.setTime(detail.id); alert('Device time synchronized.'); } catch (e: any) { alert(`Error: ${e.message}`); }
+              try { await ipc.setTime(detail.id); await ipc.confirm('Device time synchronized.'); } catch (e: any) { await ipc.confirm(`Error: ${e.message}`); }
             }} disabled={!detail.credential_id}
               className="w-full px-3 py-2 bg-slate-700 text-white text-xs rounded-lg hover:bg-slate-600 disabled:opacity-40 disabled:cursor-not-allowed">Sync Date/Time</button>
             <button onClick={async () => {
@@ -432,7 +441,7 @@ export default function DevicesPage() {
             <button onClick={async () => {
               if (!(await ipc.confirm('FACTORY RESET: This will erase all data on the device. Keep network settings?'))) return;
               const keepNet = await ipc.confirm('Preserve network configuration (IP, DHCP)?');
-              try { await ipc.factoryReset(detail.id, keepNet); alert('Factory reset sent. Device is restarting...'); await load(); } catch (e: any) { alert(`Error: ${e.message}`); }
+              try { await ipc.factoryReset(detail.id, keepNet); await ipc.confirm('Factory reset sent. Device is restarting...'); await load(); } catch (e: any) { await ipc.confirm(`Error: ${e.message}`); }
             }} disabled={!detail.credential_id}
               className="w-full px-3 py-2 bg-red-900/60 text-red-300 text-xs rounded-lg hover:bg-red-800 disabled:opacity-40 disabled:cursor-not-allowed">Factory Reset</button>
             <button onClick={() => handleDelete(detail.id)}

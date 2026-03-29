@@ -23,11 +23,11 @@ export default function TemplatesPage() {
     try {
       await ipc.createTemplateFromDevice(deviceId, name);
       load();
-    } catch (err: any) { alert(`Error: ${err.message}`); }
+    } catch (err: any) { ipc.confirm(`Error: ${err.message}`); }
   };
 
   const handleDelete = async (id: string) => {
-    if (!confirm('Delete this template?')) return;
+    if (!(await ipc.confirm('Delete this template?'))) return;
     await ipc.deleteTemplate(id);
     setDetail(null);
     load();
@@ -39,8 +39,8 @@ export default function TemplatesPage() {
       await ipc.applyTemplate(applyingTemplate.id, Array.from(selected));
       setApplyingTemplate(null);
       setSelected(new Set());
-      alert('Template application started. Check Tasks for progress.');
-    } catch (err: any) { alert(`Error: ${err.message}`); }
+      ipc.confirm('Template application started. Check Tasks for progress.');
+    } catch (err: any) { ipc.confirm(`Error: ${err.message}`); }
   };
 
   const viewConfig = async (id: string) => {

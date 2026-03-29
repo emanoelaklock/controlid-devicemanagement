@@ -22,8 +22,8 @@ export default function CredentialsPage() {
   useEffect(() => { load(); }, []);
 
   const handleAdd = async () => {
-    if (!form.name.trim()) { alert('Name is required'); return; }
-    if (!form.password.trim()) { alert('Password is required'); return; }
+    if (!form.name.trim()) { ipc.confirm('Name is required'); return; }
+    if (!form.password.trim()) { ipc.confirm('Password is required'); return; }
     setSaving(true);
     setError('');
     try {
@@ -38,7 +38,7 @@ export default function CredentialsPage() {
       await load();
     } catch (err: any) {
       setError(`Error creating credential: ${err.message || err}`);
-      alert(`Error creating credential: ${err.message || err}`);
+      ipc.confirm(`Error creating credential: ${err.message || err}`);
     } finally {
       setSaving(false);
     }
@@ -49,17 +49,17 @@ export default function CredentialsPage() {
       await ipc.invoke('credentials:set-default', id);
       await load();
     } catch (err: any) {
-      alert(`Error: ${err.message || err}`);
+      ipc.confirm(`Error: ${err.message || err}`);
     }
   };
 
   const handleDelete = async (id: string) => {
-    if (!confirm('Delete this credential?')) return;
+    if (!(await ipc.confirm('Delete this credential?'))) return;
     try {
       await ipc.deleteCredential(id);
       await load();
     } catch (err: any) {
-      alert(`Error: ${err.message || err}`);
+      ipc.confirm(`Error: ${err.message || err}`);
     }
   };
 

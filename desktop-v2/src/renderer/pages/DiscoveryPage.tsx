@@ -63,10 +63,10 @@ export default function DiscoveryPage() {
           r.ipAddress === retryDevice.ipAddress ? { ...r, authStatus: 'authenticated', credentialName: cred.name } : r
         ));
       } else {
-        alert('Authentication failed with these credentials.');
+        ipc.confirm('Authentication failed with these credentials.');
       }
     } catch (err: any) {
-      alert(`Error: ${err.message || err}`);
+      ipc.confirm(`Error: ${err.message || err}`);
     }
     setRetryDevice(null);
     setRetryForm({ username: 'admin', password: '' });
