@@ -18,6 +18,7 @@ contextBridge.exposeInMainWorld('api', {
       'jobs:list', 'jobs:get', 'jobs:cancel',
       'audit:list',
       'groups:list', 'groups:create', 'groups:delete',
+      'history:device', 'history:all-recent',
       'dashboard:stats',
       'config:backup', 'config:backups', 'config:restore',
       'templates:list', 'templates:create-from-device', 'templates:create', 'templates:delete', 'templates:get', 'templates:apply',

@@ -1,4 +1,5 @@
 import net from 'net';
+import { v4 as uuid } from 'uuid';
 import { BrowserWindow } from 'electron';
 import { query, queryOne, run } from '../db/queries';
 import { saveDb } from '../db/database';
@@ -43,6 +44,8 @@ export class HeartbeatService {
             this.offlineCounters.delete(device.id);
             if (device.status !== 'online') {
               run(`UPDATE devices SET status='online', last_heartbeat=datetime('now'), updated_at=datetime('now') WHERE id=?`, [device.id]);
+              // Log connection restored
+              run(`INSERT INTO connection_history (id, device_id, event) VALUES (?, ?, 'online')`, [uuid(), device.id]);
               changed = true;
             } else {
               run(`UPDATE devices SET last_heartbeat=datetime('now') WHERE id=?`, [device.id]);
@@ -56,6 +59,8 @@ export class HeartbeatService {
 
           if (device.status !== 'offline') {
             run(`UPDATE devices SET status='offline', updated_at=datetime('now') WHERE id=?`, [device.id]);
+            // Log connection lost
+            run(`INSERT INTO connection_history (id, device_id, event) VALUES (?, ?, 'offline')`, [uuid(), device.id]);
             changed = true;
           }
 

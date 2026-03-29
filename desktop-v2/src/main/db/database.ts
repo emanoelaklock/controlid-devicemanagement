@@ -199,9 +199,22 @@ function createSchema(): void {
     )
   `);
 
+  _db.run(`
+    CREATE TABLE IF NOT EXISTS connection_history (
+      id TEXT PRIMARY KEY NOT NULL,
+      device_id TEXT NOT NULL REFERENCES devices(id) ON DELETE CASCADE,
+      event TEXT NOT NULL,
+      timestamp TEXT NOT NULL DEFAULT (datetime('now'))
+    )
+  `);
+
   _db.run(`CREATE INDEX IF NOT EXISTS idx_devices_status ON devices(status)`);
   _db.run(`CREATE INDEX IF NOT EXISTS idx_devices_ip ON devices(ip_address)`);
   _db.run(`CREATE INDEX IF NOT EXISTS idx_audit_logs_created ON audit_logs(created_at)`);
   _db.run(`CREATE INDEX IF NOT EXISTS idx_jobs_status ON jobs(status)`);
   _db.run(`CREATE INDEX IF NOT EXISTS idx_job_items_job ON job_items(job_id)`);
+  _db.run(`CREATE INDEX IF NOT EXISTS idx_connection_history_device ON connection_history(device_id, timestamp)`);
+
+  // Purge connection history older than 90 days
+  _db.run(`DELETE FROM connection_history WHERE timestamp < datetime('now', '-90 days')`);
 }

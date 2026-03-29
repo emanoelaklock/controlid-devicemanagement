@@ -60,6 +60,10 @@ export const ipc = {
   createGroup: (data: any) => window.api.invoke('groups:create', data),
   deleteGroup: (id: string) => window.api.invoke('groups:delete', id),
 
+  // Connection History
+  deviceHistory: (deviceId: string, days?: number) => window.api.invoke('history:device', { deviceId, days }),
+  recentHistory: (limit?: number) => window.api.invoke('history:all-recent', { limit }),
+
   // Dashboard
   getStats: () => window.api.invoke('dashboard:stats'),
 

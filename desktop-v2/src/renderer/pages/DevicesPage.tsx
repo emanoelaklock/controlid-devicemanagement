@@ -18,6 +18,7 @@ export default function DevicesPage() {
   const [editValue, setEditValue] = useState('');
   const [groups, setGroups] = useState<any[]>([]);
   const [addForm, setAddForm] = useState({ name: '', ip_address: '', port: 80, manufacturer: 'controlid', model: '' });
+  const [history, setHistory] = useState<any[]>([]);
   const detailRef = useRef<any>(null); // keep detail in sync
 
   const load = useCallback(async () => {
@@ -66,7 +67,12 @@ export default function DevicesPage() {
     d.firmware_version?.includes(search) || d.mac_address?.toLowerCase().includes(search.toLowerCase())
   );
 
-  const setDetailAndRef = (d: any) => { setDetail(d); detailRef.current = d; };
+  const setDetailAndRef = (d: any) => {
+    setDetail(d);
+    detailRef.current = d;
+    if (d?.id) ipc.deviceHistory(d.id, 90).then(setHistory).catch(() => setHistory([]));
+    else setHistory([]);
+  };
 
   const toggleSelect = (id: string) => {
     const next = new Set(selected);
@@ -307,6 +313,22 @@ export default function DevicesPage() {
               {!detail.credential_id && <p className="text-xs text-amber-400 mt-1">Assign a credential to enable actions</p>}
             </div>
           </div>
+
+          {/* Connection History */}
+          {history.length > 0 && (
+            <div className="px-4 py-3 border-t border-slate-800 max-h-48 overflow-auto">
+              <h3 className="text-xs text-slate-600 uppercase tracking-wide mb-2">Connection History (90 days)</h3>
+              <div className="space-y-1">
+                {history.slice(0, 50).map((h: any) => (
+                  <div key={h.id} className="flex items-center gap-2 text-xs">
+                    <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${h.event === 'online' ? 'bg-emerald-500' : 'bg-red-500'}`} />
+                    <span className="text-slate-500 flex-1">{h.event === 'online' ? 'Connected' : 'Disconnected'}</span>
+                    <span className="text-slate-600 text-[10px]">{new Date(h.timestamp).toLocaleString()}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
 
           {/* Actions */}
           <div className="p-4 border-t border-slate-800 space-y-2 flex-shrink-0">

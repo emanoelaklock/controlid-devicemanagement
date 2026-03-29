@@ -346,6 +346,19 @@ export function registerIpcHandlers(getWindow: () => BrowserWindow | null): void
     run('DELETE FROM device_groups WHERE id = ?', [id]);
   });
 
+  // ─── Connection History ─────────────────────────────────────────
+
+  ipcMain.handle('history:device', (_e, { deviceId, days }: any) => {
+    const d = days || 90;
+    return query(`SELECT * FROM connection_history WHERE device_id = ? AND timestamp >= datetime('now', '-${d} days') ORDER BY timestamp DESC`, [deviceId]);
+  });
+
+  ipcMain.handle('history:all-recent', (_e, { limit }: any) => {
+    return query(`SELECT ch.*, d.name as device_name, d.ip_address
+      FROM connection_history ch JOIN devices d ON ch.device_id = d.id
+      ORDER BY ch.timestamp DESC LIMIT ?`, [limit || 50]);
+  });
+
   // ─── Dashboard ──────────────────────────────────────────────────
 
   ipcMain.handle('dashboard:stats', () => {
