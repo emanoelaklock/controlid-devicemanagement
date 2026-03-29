@@ -16,13 +16,15 @@ export default function DevicesPage() {
   const [testing, setTesting] = useState(false);
   const [editing, setEditing] = useState<string | null>(null); // field being edited
   const [editValue, setEditValue] = useState('');
+  const [groups, setGroups] = useState<any[]>([]);
   const [addForm, setAddForm] = useState({ name: '', ip_address: '', port: 80, manufacturer: 'controlid', model: '' });
   const detailRef = useRef<any>(null); // keep detail in sync
 
   const load = useCallback(async () => {
-    const [devs, creds] = await Promise.all([ipc.listDevices(), ipc.listCredentials()]);
+    const [devs, creds, grps] = await Promise.all([ipc.listDevices(), ipc.listCredentials(), ipc.listGroups()]);
     setDevices(devs);
     setCredentials(creds);
+    setGroups(grps);
     // Update detail panel if open
     if (detailRef.current) {
       const updated = devs.find((d: any) => d.id === detailRef.current.id);
@@ -270,7 +272,6 @@ export default function DevicesPage() {
               ['HTTPS', detail.https_enabled ? 'Yes' : 'No'],
               ['DHCP', detail.dhcp_enabled ? 'Yes' : 'No'],
               ['Last Heartbeat', detail.last_heartbeat ? new Date(detail.last_heartbeat).toLocaleString() : 'Never'],
-              ['Group', detail.group_name],
             ].map(([label, value]) => (
               <div key={label as string}>
                 <span className="text-xs text-slate-600 uppercase tracking-wide">{label}</span>
@@ -281,6 +282,46 @@ export default function DevicesPage() {
             {/* Notes - editable */}
             <EditableField label="Notes" value={detail.notes} field="notes" editing={editing} editValue={editValue}
               onStart={startEdit} onChange={setEditValue} onSave={saveEdit} onCancel={cancelEdit} multiline />
+
+            {/* Network config */}
+            {detail.credential_id && (
+              <div className="pt-2 border-t border-slate-800">
+                <span className="text-xs text-slate-600 uppercase tracking-wide">Network Config</span>
+                <div className="flex gap-2 mt-2">
+                  <button onClick={async () => {
+                    if (!confirm('Switch to DHCP? Device IP may change.')) return;
+                    try { await ipc.setNetwork(detail.id, { dhcp: true }); await load(); alert('DHCP enabled'); } catch (e: any) { alert(e.message); }
+                  }} className={`flex-1 px-2 py-1.5 text-xs rounded ${detail.dhcp_enabled ? 'bg-emerald-600 text-white' : 'bg-slate-700 text-slate-300'}`}>
+                    DHCP
+                  </button>
+                  <button onClick={async () => {
+                    const ip = prompt('Static IP:', detail.ip_address);
+                    if (!ip) return;
+                    const netmask = prompt('Netmask:', '255.255.255.0');
+                    const gateway = prompt('Gateway:', detail.ip_address.split('.').slice(0, 3).join('.') + '.1');
+                    try { await ipc.setNetwork(detail.id, { dhcp: false, ip, netmask, gateway }); await load(); alert('Static IP set'); } catch (e: any) { alert(e.message); }
+                  }} className={`flex-1 px-2 py-1.5 text-xs rounded ${!detail.dhcp_enabled ? 'bg-blue-600 text-white' : 'bg-slate-700 text-slate-300'}`}>
+                    Static IP
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* Group assignment */}
+            <div className="pt-2 border-t border-slate-800">
+              <span className="text-xs text-slate-600 uppercase tracking-wide">Group</span>
+              <div className="flex gap-1 mt-1">
+                <select value={detail.group_id || ''} onChange={e => { ipc.updateDevice(detail.id, { group_id: e.target.value || null }); load(); }}
+                  className="flex-1 px-2 py-1.5 bg-slate-800 border border-slate-700 rounded text-sm text-white">
+                  <option value="">-- No group --</option>
+                  {groups.map(g => <option key={g.id} value={g.id}>{g.name}</option>)}
+                </select>
+                <button onClick={() => {
+                  const name = prompt('New group name:');
+                  if (name) ipc.createGroup({ name }).then(() => load());
+                }} className="px-2 py-1.5 bg-slate-700 text-white text-xs rounded hover:bg-slate-600">+</button>
+              </div>
+            </div>
 
             {/* Credential assignment */}
             <div className="pt-2 border-t border-slate-800">
