@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { ipc } from '../hooks/useIpc';
+import { fmtDate } from '../utils/date';
 
 export default function TemplatesPage() {
   const [templates, setTemplates] = useState<any[]>([]);
@@ -119,7 +120,7 @@ export default function TemplatesPage() {
                       <p className="text-xs text-slate-500 mt-0.5 capitalize">{t.manufacturer} {t.model ? `• ${t.model}` : ''}</p>
                     </div>
                   </div>
-                  <p className="text-xs text-slate-600 mb-3">Created: {new Date(t.created_at).toLocaleDateString()}</p>
+                  <p className="text-xs text-slate-600 mb-3">Created: {fmtDate(t.created_at)}</p>
                   <div className="flex gap-2">
                     <button onClick={() => viewConfig(t.id)} className="px-3 py-1 bg-slate-700 text-white text-xs rounded hover:bg-slate-600">View</button>
                     <button onClick={() => { setApplyingTemplate(t); setSelected(new Set()); }}

@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { ipc } from '../hooks/useIpc';
+import { fmtDate } from '../utils/date';
 
 const STATUS_COLORS: Record<string, string> = {
   online: 'bg-emerald-500', offline: 'bg-red-500', error: 'bg-amber-500',
@@ -210,7 +211,7 @@ export default function DevicesPage() {
                   <td className="px-3 py-2 text-slate-400 text-xs">{d.firmware_version || '-'}</td>
                   <td className="px-3 py-2 text-slate-500 font-mono text-xs">{d.mac_address || '-'}</td>
                   <td className="px-3 py-2 text-xs">{d.dhcp_enabled ? <span className="text-emerald-400">Yes</span> : <span className="text-slate-500">No</span>}</td>
-                  <td className="px-3 py-2 text-slate-500 text-xs">{d.last_heartbeat ? new Date(d.last_heartbeat).toLocaleString() : 'Never'}</td>
+                  <td className="px-3 py-2 text-slate-500 text-xs">{d.last_heartbeat ? fmtDate(d.last_heartbeat) : 'Never'}</td>
                 </tr>
               ))}
               {filtered.length === 0 && (
@@ -268,7 +269,7 @@ export default function DevicesPage() {
               ['Manufacturer', detail.manufacturer],
               ['HTTPS', detail.https_enabled ? 'Yes' : 'No'],
               ['DHCP', detail.dhcp_enabled ? 'Yes' : 'No'],
-              ['Last Heartbeat', detail.last_heartbeat ? new Date(detail.last_heartbeat).toLocaleString() : 'Never'],
+              ['Last Heartbeat', detail.last_heartbeat ? fmtDate(detail.last_heartbeat) : 'Never'],
             ].map(([label, value]) => (
               <div key={label as string}>
                 <span className="text-xs text-slate-600 uppercase tracking-wide">{label}</span>
@@ -317,7 +318,7 @@ export default function DevicesPage() {
                   <div key={h.id} className="flex items-center gap-2 text-xs">
                     <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${h.event === 'online' ? 'bg-emerald-500' : 'bg-red-500'}`} />
                     <span className="text-slate-500 flex-1">{h.event === 'online' ? 'Connected' : 'Disconnected'}</span>
-                    <span className="text-slate-600 text-[10px]">{new Date(h.timestamp).toLocaleString()}</span>
+                    <span className="text-slate-600 text-[10px]">{fmtDate(h.timestamp)}</span>
                   </div>
                 ))}
               </div>

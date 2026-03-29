@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { ipc } from '../hooks/useIpc';
+import { fmtDate } from '../utils/date';
 
 export default function DashboardPage() {
   const [stats, setStats] = useState<any>(null);
@@ -94,7 +95,7 @@ export default function DashboardPage() {
             </div>
           </div>
           {stats.lastScanAt && (
-            <p className="text-xs text-slate-600 mt-4">Last network scan: {new Date(stats.lastScanAt).toLocaleString()}</p>
+            <p className="text-xs text-slate-600 mt-4">Last network scan: {fmtDate(stats.lastScanAt)}</p>
           )}
         </div>
 
@@ -156,7 +157,7 @@ export default function DashboardPage() {
                   a.severity === 'warning' ? 'bg-amber-400' : 'bg-blue-400'
                 }`} />
                 <span className="text-slate-400 flex-1 truncate">{a.action}{a.device_name ? `: ${a.device_name}` : ''}</span>
-                <span className="text-slate-600 flex-shrink-0">{new Date(a.created_at).toLocaleTimeString()}</span>
+                <span className="text-slate-600 flex-shrink-0">{fmtDate(a.created_at)}</span>
               </div>
             ))}
           </div>

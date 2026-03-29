@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { ipc } from '../hooks/useIpc';
+import { fmtDate } from '../utils/date';
 
 const SEVERITY_COLORS: Record<string, string> = {
   info: 'bg-blue-500', warning: 'bg-amber-500', error: 'bg-red-500', critical: 'bg-red-600',
@@ -48,7 +49,7 @@ export default function AuditPage() {
             {logs.map(log => (
               <tr key={log.id} className="hover:bg-slate-800/50">
                 <td className="px-4 py-2.5"><span className={`inline-block w-2.5 h-2.5 rounded-full ${SEVERITY_COLORS[log.severity] || 'bg-slate-500'}`} /></td>
-                <td className="px-4 py-2.5 text-slate-500 text-xs whitespace-nowrap">{new Date(log.created_at).toLocaleString()}</td>
+                <td className="px-4 py-2.5 text-slate-500 text-xs whitespace-nowrap">{fmtDate(log.created_at)}</td>
                 <td className="px-4 py-2.5 text-white">{log.action}</td>
                 <td className="px-4 py-2.5 text-slate-400 capitalize">{log.category}</td>
                 <td className="px-4 py-2.5 text-slate-400">{log.device_name || '-'}</td>

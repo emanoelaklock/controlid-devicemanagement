@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { ipc } from '../hooks/useIpc';
+import { fmtDate } from '../utils/date';
 
 export default function CredentialsPage() {
   const [creds, setCreds] = useState<any[]>([]);
@@ -131,7 +132,7 @@ export default function CredentialsPage() {
                   {!!c.is_default && <span className="ml-2 text-xs text-brand-400 bg-brand-500/10 px-2 py-0.5 rounded-full">Default</span>}
                 </td>
                 <td className="px-4 py-3 text-slate-400">{c.username}</td>
-                <td className="px-4 py-3 text-slate-500 text-xs">{new Date(c.created_at).toLocaleDateString()}</td>
+                <td className="px-4 py-3 text-slate-500 text-xs">{fmtDate(c.created_at)}</td>
                 <td className="px-4 py-3">
                   <button onClick={() => handleDelete(c.id)} className="text-red-500 text-xs hover:underline">Delete</button>
                 </td>

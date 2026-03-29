@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { ipc } from '../hooks/useIpc';
+import { fmtDate } from '../utils/date';
 
 const STATUS_COLORS: Record<string, string> = {
   pending: 'bg-slate-500', running: 'bg-blue-500', completed: 'bg-emerald-500',
@@ -50,7 +51,7 @@ export default function JobsPage() {
                 </div>
                 <div className="flex items-center justify-between mt-2 text-xs text-slate-500">
                   <span>{job.type} &middot; {job.completed_items}/{job.total_items} completed, {job.failed_items} failed</span>
-                  <span>{new Date(job.created_at).toLocaleString()}</span>
+                  <span>{fmtDate(job.created_at)}</span>
                 </div>
               </div>
             ))}
