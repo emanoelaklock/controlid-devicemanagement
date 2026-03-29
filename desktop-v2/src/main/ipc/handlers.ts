@@ -517,31 +517,35 @@ export function registerIpcHandlers(getWindow: () => BrowserWindow | null): void
       JSON.stringify({ login: device.username || 'admin', password: conn_password }), 10000);
     if (!loginRes?.session) throw new Error('Authentication failed');
 
-    // Apply network config
+    // Build network config matching Control iD API structure
     const netConfig: any = {};
     if (network.dhcp !== undefined) netConfig.dhcp_enabled = network.dhcp;
-    if (network.ip) netConfig.ip = network.ip;
-    if (network.netmask) netConfig.netmask = network.netmask;
-    if (network.gateway) netConfig.gateway = network.gateway;
-    if (network.dns) netConfig.primary_dns = network.dns;
-
-    await adapter.httpRequest(proto, device.ip_address, device.port, '/set_configuration.fcgi',
-      JSON.stringify({ network: netConfig }), 10000, loginRes.session);
-    await adapter.httpRequest(proto, device.ip_address, device.port, '/logout.fcgi', '{}', 5000, loginRes.session).catch(() => {});
-
-    // Update local DB
-    if (network.ip && network.ip !== device.ip_address) {
-      run(`UPDATE devices SET ip_address=?, dhcp_enabled=?, updated_at=datetime('now') WHERE id=?`,
-        [network.ip, network.dhcp ? 1 : 0, id]);
-      run(`INSERT INTO audit_logs (id, action, category, device_id, device_name, details, severity) VALUES (?,?,?,?,?,?,?)`,
-        [uuid(), 'network_changed', 'device', id, device.name,
-         `IP: ${device.ip_address} -> ${network.ip}, DHCP: ${network.dhcp ? 'Yes' : 'No'}`, 'warning']);
-    } else {
-      run(`UPDATE devices SET dhcp_enabled=?, updated_at=datetime('now') WHERE id=?`,
-        [network.dhcp ? 1 : 0, id]);
+    if (!network.dhcp) {
+      if (network.ip) netConfig.ip = network.ip;
+      if (network.netmask) netConfig.netmask = network.netmask;
+      if (network.gateway) netConfig.gateway = network.gateway;
+      if (network.dns) netConfig.primary_dns = network.dns;
     }
 
-    return true;
+    console.log('[Network] Sending config to device:', JSON.stringify({ network: netConfig }));
+
+    const result = await adapter.httpRequest(proto, device.ip_address, device.port, '/set_configuration.fcgi',
+      JSON.stringify({ network: netConfig }), 10000, loginRes.session);
+    console.log('[Network] set_configuration response:', JSON.stringify(result));
+
+    // Reboot device to apply network changes
+    console.log('[Network] Rebooting device to apply changes...');
+    await adapter.httpRequest(proto, device.ip_address, device.port, '/reboot.fcgi', '{}', 10000, loginRes.session).catch(() => {});
+
+    // Update local DB
+    const newIp = network.ip || device.ip_address;
+    run(`UPDATE devices SET ip_address=?, dhcp_enabled=?, status='offline', updated_at=datetime('now') WHERE id=?`,
+      [network.dhcp ? device.ip_address : newIp, network.dhcp ? 1 : 0, id]);
+    run(`INSERT INTO audit_logs (id, action, category, device_id, device_name, details, severity) VALUES (?,?,?,?,?,?,?)`,
+      [uuid(), 'network_changed', 'device', id, device.name,
+       network.dhcp ? 'Switched to DHCP' : `Static IP: ${newIp}, Mask: ${network.netmask}, GW: ${network.gateway}`, 'warning']);
+
+    return { success: true, rebooting: true };
   });
 
   // ─── Shell & Dialogs ────────────────────────────────────────────

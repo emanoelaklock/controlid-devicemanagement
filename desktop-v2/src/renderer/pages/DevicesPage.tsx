@@ -18,6 +18,8 @@ export default function DevicesPage() {
   const [editValue, setEditValue] = useState('');
   const [groups, setGroups] = useState<any[]>([]);
   const [addForm, setAddForm] = useState({ name: '', ip_address: '', port: 80, manufacturer: 'controlid', model: '' });
+  const [showNetForm, setShowNetForm] = useState(false);
+  const [netForm, setNetForm] = useState({ mode: 'dhcp' as 'dhcp' | 'static', ip: '', netmask: '255.255.255.0', gateway: '' });
   const detailRef = useRef<any>(null); // keep detail in sync
 
   const load = useCallback(async () => {
@@ -283,26 +285,59 @@ export default function DevicesPage() {
             {/* Network config */}
             {detail.credential_id && (
               <div className="pt-2 border-t border-slate-800">
-                <span className="text-xs text-slate-600 uppercase tracking-wide">Network Config</span>
-                <div className="flex gap-2 mt-2">
-                  <button onClick={async () => {
-                    if (!(await ipc.confirm('Switch to DHCP? Device IP may change.'))) return;
-                    try { await ipc.setNetwork(detail.id, { dhcp: true }); await load(); } catch (e: any) { await ipc.confirm(`Error: ${e.message}`); }
-                  }} className={`flex-1 px-2 py-1.5 text-xs rounded ${detail.dhcp_enabled ? 'bg-emerald-600 text-white' : 'bg-slate-700 text-slate-300'}`}>
-                    DHCP
-                  </button>
-                  <button onClick={async () => {
-                    const ip = await ipc.prompt('Static IP', 'Enter the new IP address:', detail.ip_address);
-                    if (!ip) return;
-                    const netmask = await ipc.prompt('Netmask', 'Enter subnet mask:', '255.255.255.0');
-                    if (!netmask) return;
-                    const gateway = await ipc.prompt('Gateway', 'Enter gateway:', detail.ip_address.split('.').slice(0, 3).join('.') + '.1');
-                    if (!gateway) return;
-                    try { await ipc.setNetwork(detail.id, { dhcp: false, ip, netmask, gateway }); await load(); } catch (e: any) { await ipc.confirm(`Error: ${e.message}`); }
-                  }} className={`flex-1 px-2 py-1.5 text-xs rounded ${!detail.dhcp_enabled ? 'bg-blue-600 text-white' : 'bg-slate-700 text-slate-300'}`}>
-                    Static IP
-                  </button>
+                <div className="flex items-center justify-between">
+                  <span className="text-xs text-slate-600 uppercase tracking-wide">Network Config</span>
+                  <button onClick={() => {
+                    setShowNetForm(!showNetForm);
+                    setNetForm({ mode: detail.dhcp_enabled ? 'dhcp' : 'static', ip: detail.ip_address, netmask: '255.255.255.0', gateway: detail.ip_address.split('.').slice(0, 3).join('.') + '.1' });
+                  }} className="text-xs text-brand-400 hover:underline">{showNetForm ? 'Cancel' : 'Edit'}</button>
                 </div>
+                {showNetForm && (
+                  <div className="mt-2 space-y-2">
+                    <label className="flex items-center gap-2 cursor-pointer">
+                      <input type="radio" name="netmode" checked={netForm.mode === 'dhcp'}
+                        onChange={() => setNetForm({...netForm, mode: 'dhcp'})} className="accent-brand-500" />
+                      <span className="text-xs text-slate-300">DHCP (automatic)</span>
+                    </label>
+                    <label className="flex items-center gap-2 cursor-pointer">
+                      <input type="radio" name="netmode" checked={netForm.mode === 'static'}
+                        onChange={() => setNetForm({...netForm, mode: 'static'})} className="accent-brand-500" />
+                      <span className="text-xs text-slate-300">Static IP</span>
+                    </label>
+                    {netForm.mode === 'static' && (
+                      <div className="space-y-2 pl-5">
+                        <div>
+                          <label className="text-xs text-slate-600">IP Address</label>
+                          <input value={netForm.ip} onChange={e => setNetForm({...netForm, ip: e.target.value})}
+                            className="w-full px-2 py-1 bg-slate-800 border border-slate-700 rounded text-xs text-white font-mono mt-0.5" />
+                        </div>
+                        <div>
+                          <label className="text-xs text-slate-600">Subnet Mask</label>
+                          <input value={netForm.netmask} onChange={e => setNetForm({...netForm, netmask: e.target.value})}
+                            className="w-full px-2 py-1 bg-slate-800 border border-slate-700 rounded text-xs text-white font-mono mt-0.5" />
+                        </div>
+                        <div>
+                          <label className="text-xs text-slate-600">Gateway</label>
+                          <input value={netForm.gateway} onChange={e => setNetForm({...netForm, gateway: e.target.value})}
+                            className="w-full px-2 py-1 bg-slate-800 border border-slate-700 rounded text-xs text-white font-mono mt-0.5" />
+                        </div>
+                      </div>
+                    )}
+                    <button onClick={async () => {
+                      try {
+                        const config = netForm.mode === 'dhcp'
+                          ? { dhcp: true }
+                          : { dhcp: false, ip: netForm.ip, netmask: netForm.netmask, gateway: netForm.gateway };
+                        await ipc.setNetwork(detail.id, config);
+                        setShowNetForm(false);
+                        await load();
+                        alert('Network config applied. Device is rebooting...');
+                      } catch (e: any) { alert(`Error: ${e.message}`); }
+                    }} className="w-full px-3 py-1.5 bg-brand-600 text-white text-xs rounded-lg hover:bg-brand-700 mt-1">
+                      Apply & Reboot
+                    </button>
+                  </div>
+                )}
               </div>
             )}
 
