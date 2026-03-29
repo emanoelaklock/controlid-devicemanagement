@@ -19,6 +19,7 @@ export default function DevicesPage() {
   const [editValue, setEditValue] = useState('');
   const [groups, setGroups] = useState<any[]>([]);
   const [addForm, setAddForm] = useState({ name: '', ip_address: '', port: 80, manufacturer: 'controlid', model: '' });
+  const [filterGroup, setFilterGroup] = useState<string | null>(null);
   const [history, setHistory] = useState<any[]>([]);
   const detailRef = useRef<any>(null); // keep detail in sync
 
@@ -56,11 +57,33 @@ export default function DevicesPage() {
     return () => { clearInterval(interval); unsub?.(); };
   }, []);
 
-  const filtered = devices.filter(d =>
-    !search || d.name?.toLowerCase().includes(search.toLowerCase()) ||
-    d.ip_address?.includes(search) || d.model?.toLowerCase().includes(search.toLowerCase()) ||
-    d.firmware_version?.includes(search) || d.mac_address?.toLowerCase().includes(search.toLowerCase())
-  );
+  const [sortCol, setSortCol] = useState<string>('name');
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
+
+  const toggleSort = (col: string) => {
+    if (sortCol === col) setSortDir(sortDir === 'asc' ? 'desc' : 'asc');
+    else { setSortCol(col); setSortDir('asc'); }
+  };
+
+  const sortIcon = (col: string) => sortCol === col ? (sortDir === 'asc' ? ' ▲' : ' ▼') : '';
+
+  const filtered = devices
+    .filter(d => {
+      if (filterGroup === '__none__') return !d.group_id;
+      if (filterGroup) return d.group_id === filterGroup;
+      return true;
+    })
+    .filter(d =>
+      !search || d.name?.toLowerCase().includes(search.toLowerCase()) ||
+      d.ip_address?.includes(search) || d.model?.toLowerCase().includes(search.toLowerCase()) ||
+      d.firmware_version?.includes(search) || d.mac_address?.toLowerCase().includes(search.toLowerCase())
+    )
+    .sort((a, b) => {
+      const va = (a[sortCol] ?? '') as string;
+      const vb = (b[sortCol] ?? '') as string;
+      const cmp = String(va).localeCompare(String(vb), undefined, { numeric: true });
+      return sortDir === 'asc' ? cmp : -cmp;
+    });
 
   const setDetailAndRef = (d: any) => {
     setDetail(d);
@@ -141,6 +164,38 @@ export default function DevicesPage() {
 
   return (
     <div className="flex h-full">
+      {/* Groups sidebar */}
+      <div className="w-48 border-r border-slate-800 bg-slate-900/50 flex flex-col flex-shrink-0">
+        <div className="px-3 py-3 border-b border-slate-800 flex items-center justify-between">
+          <span className="text-xs text-slate-500 uppercase tracking-wide font-semibold">Groups</span>
+          <button onClick={async () => {
+            const name = await ipc.prompt('New Group', 'Enter group name:');
+            if (name) { await ipc.createGroup({ name }); load(); }
+          }} className="text-xs text-brand-400 hover:text-brand-300">+ New</button>
+        </div>
+        <div className="flex-1 overflow-auto p-2 space-y-0.5">
+          <button onClick={() => setFilterGroup(null)}
+            className={`w-full text-left px-3 py-1.5 rounded text-xs transition-colors ${!filterGroup ? 'bg-brand-600 text-white' : 'text-slate-400 hover:bg-slate-800'}`}>
+            All Devices <span className="text-slate-500">({devices.length})</span>
+          </button>
+          <button onClick={() => setFilterGroup('__none__')}
+            className={`w-full text-left px-3 py-1.5 rounded text-xs transition-colors ${filterGroup === '__none__' ? 'bg-brand-600 text-white' : 'text-slate-400 hover:bg-slate-800'}`}>
+            Ungrouped <span className="text-slate-500">({devices.filter(d => !d.group_id).length})</span>
+          </button>
+          {groups.map(g => (
+            <div key={g.id} className="flex items-center group">
+              <button onClick={() => setFilterGroup(g.id)}
+                className={`flex-1 text-left px-3 py-1.5 rounded text-xs transition-colors truncate ${filterGroup === g.id ? 'bg-brand-600 text-white' : 'text-slate-400 hover:bg-slate-800'}`}>
+                {g.name} <span className="text-slate-500">({devices.filter(d => d.group_id === g.id).length})</span>
+              </button>
+              <button onClick={async () => {
+                if (await ipc.confirm(`Delete group "${g.name}"?`)) { await ipc.deleteGroup(g.id); load(); if (filterGroup === g.id) setFilterGroup(null); }
+              }} className="text-slate-700 hover:text-red-400 text-xs px-1 opacity-0 group-hover:opacity-100">×</button>
+            </div>
+          ))}
+        </div>
+      </div>
+
       {/* Main table area */}
       <div className="flex-1 flex flex-col min-w-0">
         {/* Toolbar */}
@@ -182,15 +237,15 @@ export default function DevicesPage() {
             <thead className="bg-slate-800/80 sticky top-0 z-10">
               <tr className="text-left text-xs text-slate-500 uppercase tracking-wide">
                 <th className="px-3 py-2.5 w-8"><input type="checkbox" checked={selected.size === filtered.length && filtered.length > 0} onChange={selectAll} className="accent-brand-500" /></th>
-                <th className="px-3 py-2.5 w-8">Status</th>
-                <th className="px-3 py-2.5">Name</th>
-                <th className="px-3 py-2.5">IP Address</th>
-                <th className="px-3 py-2.5">Model</th>
-                <th className="px-3 py-2.5">Serial</th>
-                <th className="px-3 py-2.5">Firmware</th>
-                <th className="px-3 py-2.5">MAC Address</th>
-                <th className="px-3 py-2.5">DHCP</th>
-                <th className="px-3 py-2.5">Last Heartbeat</th>
+                <th className="px-3 py-2.5 w-8 cursor-pointer hover:text-white" onClick={() => toggleSort('status')}>Status{sortIcon('status')}</th>
+                <th className="px-3 py-2.5 cursor-pointer hover:text-white" onClick={() => toggleSort('name')}>Name{sortIcon('name')}</th>
+                <th className="px-3 py-2.5 cursor-pointer hover:text-white" onClick={() => toggleSort('ip_address')}>IP Address{sortIcon('ip_address')}</th>
+                <th className="px-3 py-2.5 cursor-pointer hover:text-white" onClick={() => toggleSort('model')}>Model{sortIcon('model')}</th>
+                <th className="px-3 py-2.5 cursor-pointer hover:text-white" onClick={() => toggleSort('serial_number')}>Serial{sortIcon('serial_number')}</th>
+                <th className="px-3 py-2.5 cursor-pointer hover:text-white" onClick={() => toggleSort('firmware_version')}>Firmware{sortIcon('firmware_version')}</th>
+                <th className="px-3 py-2.5 cursor-pointer hover:text-white" onClick={() => toggleSort('mac_address')}>MAC Address{sortIcon('mac_address')}</th>
+                <th className="px-3 py-2.5 cursor-pointer hover:text-white" onClick={() => toggleSort('dhcp_enabled')}>DHCP{sortIcon('dhcp_enabled')}</th>
+                <th className="px-3 py-2.5 cursor-pointer hover:text-white" onClick={() => toggleSort('last_heartbeat')}>Last Heartbeat{sortIcon('last_heartbeat')}</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-800/50">
