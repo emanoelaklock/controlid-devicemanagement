@@ -106,6 +106,54 @@ export function registerIpcHandlers(getWindow: () => BrowserWindow | null): void
     return adapter.openDoor(conn, doorId);
   });
 
+  ipcMain.handle('devices:set-time', async (_e, id: string) => {
+    const device = queryOne(`SELECT d.*, c.username, c.password as cred_password
+      FROM devices d LEFT JOIN credentials c ON d.credential_id = c.id WHERE d.id = ?`, [id]);
+    if (!device) throw new Error('Device not found');
+    const adapter = adapterRegistry.get(device.manufacturer) as any;
+    if (!adapter?.httpRequest) throw new Error('No adapter');
+    const proto = device.port === 443 ? 'https' : 'http';
+    const pw = device.cred_password ? decrypt(device.cred_password) : '';
+    const loginRes = await adapter.httpRequest(proto, device.ip_address, device.port, '/login.fcgi',
+      JSON.stringify({ login: device.username || 'admin', password: pw }), 10000);
+    if (!loginRes?.session) throw new Error('Authentication failed');
+
+    const now = Math.floor(Date.now() / 1000);
+    const result = await adapter.httpRequest(proto, device.ip_address, device.port, '/set_system_time.fcgi',
+      JSON.stringify({ time: now }), 10000, loginRes.session);
+    console.log('[SetTime] Response:', JSON.stringify(result));
+    await adapter.httpRequest(proto, device.ip_address, device.port, '/logout.fcgi', '{}', 5000, loginRes.session).catch(() => {});
+
+    run(`INSERT INTO audit_logs (id, action, category, device_id, device_name, details, severity) VALUES (?,?,?,?,?,?,?)`,
+      [uuid(), 'set_time', 'device', id, device.name, `System time synchronized`, 'info']);
+    return true;
+  });
+
+  ipcMain.handle('devices:factory-reset', async (_e, { id, keepNetwork }: { id: string; keepNetwork: boolean }) => {
+    const device = queryOne(`SELECT d.*, c.username, c.password as cred_password
+      FROM devices d LEFT JOIN credentials c ON d.credential_id = c.id WHERE d.id = ?`, [id]);
+    if (!device) throw new Error('Device not found');
+    const adapter = adapterRegistry.get(device.manufacturer) as any;
+    if (!adapter?.httpRequest) throw new Error('No adapter');
+    const proto = device.port === 443 ? 'https' : 'http';
+    const pw = device.cred_password ? decrypt(device.cred_password) : '';
+    const loginRes = await adapter.httpRequest(proto, device.ip_address, device.port, '/login.fcgi',
+      JSON.stringify({ login: device.username || 'admin', password: pw }), 10000);
+    if (!loginRes?.session) throw new Error('Authentication failed');
+
+    const payload = keepNetwork ? { keep_network_info: true } : {};
+    console.log('[FactoryReset] Sending:', JSON.stringify(payload), 'keepNetwork:', keepNetwork);
+    const result = await adapter.httpRequest(proto, device.ip_address, device.port, '/reset_to_factory_default.fcgi',
+      JSON.stringify(payload), 10000, loginRes.session);
+    console.log('[FactoryReset] Response:', JSON.stringify(result));
+
+    run(`UPDATE devices SET status='offline', updated_at=datetime('now') WHERE id=?`, [id]);
+    run(`INSERT INTO audit_logs (id, action, category, device_id, device_name, details, severity) VALUES (?,?,?,?,?,?,?)`,
+      [uuid(), 'factory_reset', 'device', id, device.name,
+       `Factory reset${keepNetwork ? ' (network preserved)' : ' (full reset)'}`, 'critical']);
+    return true;
+  });
+
   // ─── Batch operations ──────────────────────────────────────────
 
   ipcMain.handle('batch:reboot', async (_e, deviceIds: string[]) => {

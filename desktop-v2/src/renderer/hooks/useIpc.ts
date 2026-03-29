@@ -19,6 +19,8 @@ export const ipc = {
   testConnection: (id: string) => window.api.invoke('devices:test-connection', id),
   rebootDevice: (id: string) => window.api.invoke('devices:reboot', id),
   openDoor: (deviceId: string, doorId?: number) => window.api.invoke('devices:open-door', { deviceId, doorId }),
+  setTime: (id: string) => window.api.invoke('devices:set-time', id),
+  factoryReset: (id: string, keepNetwork: boolean) => window.api.invoke('devices:factory-reset', { id, keepNetwork }),
   setNetwork: (id: string, network: any) => window.api.invoke('devices:set-network', { id, network }),
 
   // Batch
