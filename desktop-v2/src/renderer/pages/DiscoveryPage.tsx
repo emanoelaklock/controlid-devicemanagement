@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { ipc } from '../hooks/useIpc';
+import { toast } from '../components/Toast';
 
 const AUTH_BADGE: Record<string, { text: string; color: string }> = {
   authenticated: { text: 'Connected', color: 'bg-emerald-500/20 text-emerald-400' },
@@ -63,10 +64,10 @@ export default function DiscoveryPage() {
           r.ipAddress === retryDevice.ipAddress ? { ...r, authStatus: 'authenticated', credentialName: cred.name } : r
         ));
       } else {
-        ipc.confirm('Authentication failed with these credentials.');
+        toast('Authentication failed with these credentials.');
       }
     } catch (err: any) {
-      ipc.confirm(`Error: ${err.message || err}`);
+      toast(`Error: ${err.message || err}`);
     }
     setRetryDevice(null);
     setRetryForm({ username: 'admin', password: '' });

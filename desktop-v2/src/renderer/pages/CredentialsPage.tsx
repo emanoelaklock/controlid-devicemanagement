@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { ipc } from '../hooks/useIpc';
 import { fmtDate } from '../utils/date';
+import { toast } from '../components/Toast';
 
 export default function CredentialsPage() {
   const [creds, setCreds] = useState<any[]>([]);
@@ -22,8 +23,8 @@ export default function CredentialsPage() {
   useEffect(() => { load(); }, []);
 
   const handleAdd = async () => {
-    if (!form.name.trim()) { ipc.confirm('Name is required'); return; }
-    if (!form.password.trim()) { ipc.confirm('Password is required'); return; }
+    if (!form.name.trim()) { toast('Name is required'); return; }
+    if (!form.password.trim()) { toast('Password is required'); return; }
     setSaving(true);
     setError('');
     try {
@@ -38,7 +39,7 @@ export default function CredentialsPage() {
       await load();
     } catch (err: any) {
       setError(`Error creating credential: ${err.message || err}`);
-      ipc.confirm(`Error creating credential: ${err.message || err}`);
+      toast(`Error creating credential: ${err.message || err}`);
     } finally {
       setSaving(false);
     }
@@ -49,7 +50,7 @@ export default function CredentialsPage() {
       await ipc.invoke('credentials:set-default', id);
       await load();
     } catch (err: any) {
-      ipc.confirm(`Error: ${err.message || err}`);
+      toast(`Error: ${err.message || err}`);
     }
   };
 
@@ -59,7 +60,7 @@ export default function CredentialsPage() {
       await ipc.deleteCredential(id);
       await load();
     } catch (err: any) {
-      ipc.confirm(`Error: ${err.message || err}`);
+      toast(`Error: ${err.message || err}`);
     }
   };
 

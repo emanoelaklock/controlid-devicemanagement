@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { ipc } from '../hooks/useIpc';
 import { fmtDate } from '../utils/date';
+import { toast } from '../components/Toast';
 
 const STATUS_COLORS: Record<string, string> = {
   online: 'bg-emerald-500', offline: 'bg-red-500', error: 'bg-amber-500',
@@ -141,9 +142,9 @@ export default function DevicesPage() {
     try {
       const result = await ipc.testConnection(deviceId);
       await load();
-      if (!result.connected) await ipc.confirm('Could not connect. Check credentials and port.');
+      if (!result.connected) toast('Could not connect. Check credentials and port.', 'error');
     } catch (err: any) {
-      await ipc.confirm(`Connection failed: ${err.message || err}`);
+      toast(`Connection failed: ${err.message || err}`, 'error');
     } finally {
       setTesting(false);
     }
@@ -224,9 +225,9 @@ export default function DevicesPage() {
           </button>
           <button onClick={async () => {
             const allIds = devices.filter(d => d.credential_id).map((d: any) => d.id);
-            if (allIds.length === 0) { await ipc.confirm('No devices with credentials to refresh.'); return; }
+            if (allIds.length === 0) { toast('No devices with credentials to refresh.', 'warning'); return; }
             await ipc.batchTestConnection(allIds);
-            await ipc.confirm(`Refreshing ${allIds.length} devices... Check Tasks for progress.`);
+            toast(`Refreshing ${allIds.length} devices...`, 'info');
             setTimeout(refreshAll, 3000);
           }} className="px-3 py-1.5 bg-teal-600 text-white text-xs rounded-lg hover:bg-teal-700">
             Refresh Devices
@@ -406,7 +407,7 @@ export default function DevicesPage() {
                 try {
                   const result = await ipc.locateDevice(detail.id);
                   if (result.found) {
-                    await ipc.confirm(`Device found at new IP: ${result.newIp} (was ${result.oldIp})`);
+                    toast(`Device found at new IP: ${result.newIp} (was ${result.oldIp})`, 'success');
                     const devs = await ipc.listDevices();
                     setDevices(devs);
                     const updated = devs.find((d: any) => d.id === detail.id);
@@ -415,9 +416,9 @@ export default function DevicesPage() {
                     ipc.listCredentials().then(setCredentials);
                     ipc.listGroups().then(setGroups);
                   } else {
-                    await ipc.confirm('Device not found on the subnet. It may be powered off or on a different network.');
+                    toast('Device not found on the subnet.', 'warning');
                   }
-                } catch (e: any) { await ipc.confirm(`Error: ${e.message}`); }
+                } catch (e: any) { toast(`Error: ${e.message}`, 'error'); }
                 finally { setTesting(false); }
               }} disabled={testing}
                 className="w-full px-3 py-2 bg-purple-600 text-white text-xs rounded-lg hover:bg-purple-700 disabled:opacity-40">
@@ -429,19 +430,19 @@ export default function DevicesPage() {
             <button onClick={async () => { if (await ipc.confirm('Reboot this device?')) ipc.rebootDevice(detail.id); }} disabled={!detail.credential_id}
               className="w-full px-3 py-2 bg-amber-600 text-white text-xs rounded-lg hover:bg-amber-700 disabled:opacity-40 disabled:cursor-not-allowed">Reboot</button>
             <button onClick={async () => {
-              try { await ipc.setTime(detail.id); await ipc.confirm('Device time synchronized.'); } catch (e: any) { await ipc.confirm(`Error: ${e.message}`); }
+              try { await ipc.setTime(detail.id); toast('Device time synchronized.', 'success'); } catch (e: any) { toast(`Error: ${e.message}`, 'error'); }
             }} disabled={!detail.credential_id}
               className="w-full px-3 py-2 bg-slate-700 text-white text-xs rounded-lg hover:bg-slate-600 disabled:opacity-40 disabled:cursor-not-allowed">Sync Date/Time</button>
             <button onClick={async () => {
               const name = await ipc.prompt('Save as Template', 'Enter template name:', `${detail.model || 'Device'} Config`);
               if (!name) return;
-              try { await ipc.createTemplateFromDevice(detail.id, name); await ipc.confirm(`Template "${name}" created successfully.`); } catch (e: any) { await ipc.confirm(`Error: ${e.message}`); }
+              try { await ipc.createTemplateFromDevice(detail.id, name); toast(`Template "${name}" created.`, 'success'); } catch (e: any) { toast(`Error: ${e.message}`, 'error'); }
             }} disabled={!detail.credential_id}
               className="w-full px-3 py-2 bg-slate-700 text-white text-xs rounded-lg hover:bg-slate-600 disabled:opacity-40 disabled:cursor-not-allowed">Save as Template</button>
             <button onClick={async () => {
               if (!(await ipc.confirm('FACTORY RESET: This will erase all data on the device. Keep network settings?'))) return;
               const keepNet = await ipc.confirm('Preserve network configuration (IP, DHCP)?');
-              try { await ipc.factoryReset(detail.id, keepNet); await ipc.confirm('Factory reset sent. Device is restarting...'); await load(); } catch (e: any) { await ipc.confirm(`Error: ${e.message}`); }
+              try { await ipc.factoryReset(detail.id, keepNet); toast('Factory reset sent. Device is restarting...', 'warning'); await load(); } catch (e: any) { toast(`Error: ${e.message}`, 'error'); }
             }} disabled={!detail.credential_id}
               className="w-full px-3 py-2 bg-red-900/60 text-red-300 text-xs rounded-lg hover:bg-red-800 disabled:opacity-40 disabled:cursor-not-allowed">Factory Reset</button>
             <button onClick={() => handleDelete(detail.id)}

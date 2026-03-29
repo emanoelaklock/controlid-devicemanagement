@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import Sidebar from './components/Sidebar';
+import { ToastContainer } from './components/Toast';
 import DashboardPage from './pages/DashboardPage';
 import DevicesPage from './pages/DevicesPage';
 import DiscoveryPage from './pages/DiscoveryPage';
@@ -29,6 +30,7 @@ export default function App() {
 
   return (
     <div className="flex h-screen overflow-hidden">
+      <ToastContainer />
       <Sidebar currentPage={page} onNavigate={setPage} />
       <main className="flex-1 overflow-auto bg-slate-900">
         {renderPage()}

@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { ipc } from '../hooks/useIpc';
 import { fmtDate } from '../utils/date';
+import { toast } from '../components/Toast';
 
 export default function TemplatesPage() {
   const [templates, setTemplates] = useState<any[]>([]);
@@ -23,7 +24,7 @@ export default function TemplatesPage() {
     try {
       await ipc.createTemplateFromDevice(deviceId, name);
       load();
-    } catch (err: any) { ipc.confirm(`Error: ${err.message}`); }
+    } catch (err: any) { toast(`Error: ${err.message}`); }
   };
 
   const handleDelete = async (id: string) => {
@@ -39,8 +40,8 @@ export default function TemplatesPage() {
       await ipc.applyTemplate(applyingTemplate.id, Array.from(selected));
       setApplyingTemplate(null);
       setSelected(new Set());
-      ipc.confirm('Template application started. Check Tasks for progress.');
-    } catch (err: any) { ipc.confirm(`Error: ${err.message}`); }
+      toast('Template application started. Check Tasks for progress.');
+    } catch (err: any) { toast(`Error: ${err.message}`); }
   };
 
   const viewConfig = async (id: string) => {
