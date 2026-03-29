@@ -1,5 +1,12 @@
 import { getDb, saveDb } from './database';
 
+/** Get current local time as ISO string for SQLite storage */
+export function nowLocal(): string {
+  const d = new Date();
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+}
+
 /** Run SELECT, return array of row objects */
 export function query(sql: string, params: any[] = []): any[] {
   const db = getDb();
