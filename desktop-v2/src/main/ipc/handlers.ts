@@ -589,52 +589,70 @@ export function registerIpcHandlers(getWindow: () => BrowserWindow | null): void
     const generalConfig = await readConfig();
     config.general_configuration = generalConfig;
 
-    // Load specific objects
-    const objects = [
-      'face_settings',        // Configurações Faciais
-      'access_rules',         // Acesso => regras
-      'time_zones',           // Zonas de tempo
-      'messages',             // Acesso => Mensagens
-      'identification_rules', // Acesso => Identificação
-      'relay_rules',          // MAE / Relés e GPIOs
-      'gpio',                 // GPIOs
-      'screen_settings',      // Configurações => Tela
-      'system_settings',      // Configurações => Sistema
-      'biometric_settings',   // Biometria
-      'door_settings',        // Configurações de porta
-      'alarm_settings',       // Alarmes
+    // Load all known Control iD object tables
+    // Try every possible table name to discover what this firmware supports
+    const allObjects = [
+      // Working on iDFace Max 7.9.9/8.3.1
+      'access_rules', 'time_zones', 'identification_rules',
+      // Access related
+      'access_logs', 'access_log_access_rules', 'contingency_access_rules',
+      'time_zone_time_spans',
+      // Users/Groups
+      'groups', 'user_groups', 'users',
+      // Identification
+      'script_instances', 'scripts',
+      // Hardware
+      'actions', 'relays', 'inputs', 'outputs',
+      'portals', 'portal_access_rules', 'portal_actions',
+      // Cards
+      'cards', 'card_technologies',
+      // Configuration tables
+      'configurations', 'general', 'online',
+      'face', 'facial_recognition',
+      'catra', 'areas', 'area_access_rules',
+      // Notification
+      'notification_servers',
     ];
 
-    for (const obj of objects) {
+    for (const obj of allObjects) {
       const data = await readObj(obj);
-      if (data) config[obj] = data;
+      if (data && !data.error) {
+        config[obj] = data;
+      }
     }
 
-    // Also try direct configuration endpoints
-    const configEndpoints = [
-      '/get_face_config.fcgi',
-      '/get_access_config.fcgi',
-      '/get_relay_config.fcgi',
-      '/get_screen_config.fcgi',
+    // Try specific configuration commands
+    const configCommands = [
+      'get_face_config', 'get_access_config', 'get_relay_config',
+      'get_screen_config', 'get_catra_config', 'get_general_config',
+      'get_online_config', 'get_notification_config',
     ];
 
-    for (const endpoint of configEndpoints) {
+    for (const cmd of configCommands) {
       try {
-        const data = await adapter.httpRequest(proto, device.ip_address, device.port, endpoint, '{}', 10000, s);
-        if (data && Object.keys(data).length > 0) {
-          config[endpoint.replace('/get_', '').replace('.fcgi', '')] = data;
+        const data = await adapter.httpRequest(proto, device.ip_address, device.port, `/${cmd}.fcgi`, '{}', 10000, s);
+        if (data && !data.error && Object.keys(data).length > 0) {
+          config[cmd.replace('get_', '')] = data;
         }
       } catch { /* skip */ }
     }
 
     await adapter.httpRequest(proto, device.ip_address, device.port, '/logout.fcgi', '{}', 5000, s).catch(() => {});
 
-    console.log('[Template] Captured config sections:', Object.keys(config).filter(k => config[k] && Object.keys(config[k]).length > 0));
-    console.log('[Template] Full config:', JSON.stringify(config, null, 2));
+    // Filter out empty and error entries
+    const cleanConfig: Record<string, any> = {};
+    for (const [key, value] of Object.entries(config)) {
+      if (value && typeof value === 'object' && !value.error && Object.keys(value).length > 0) {
+        cleanConfig[key] = value;
+      }
+    }
+
+    console.log('[Template] Valid config sections:', Object.keys(cleanConfig));
+    console.log('[Template] Full config:', JSON.stringify(cleanConfig, null, 2));
 
     const id = uuid();
     run(`INSERT INTO config_templates (id, name, manufacturer, model, config, created_at, updated_at) VALUES (?,?,?,?,?,?,?)`,
-      [id, templateName, device.manufacturer, device.model, JSON.stringify(config), nowLocal(), nowLocal()]);
+      [id, templateName, device.manufacturer, device.model, JSON.stringify(cleanConfig), nowLocal(), nowLocal()]);
     const ts = nowLocal();
     run(`INSERT INTO audit_logs (id, action, category, device_id, device_name, details, severity, created_at) VALUES (?,?,?,?,?,?,?,?)`,
       [uuid(), 'template_created', 'config', deviceId, device.name, `Template "${templateName}" from ${device.name}`, 'info', ts]);
