@@ -118,13 +118,17 @@ export function registerIpcHandlers(getWindow: () => BrowserWindow | null): void
       JSON.stringify({ login: device.username || 'admin', password: pw }), 10000);
     if (!loginRes?.session) throw new Error('Authentication failed');
 
-    // Send local time as Unix timestamp
-    // Device expects local time, not UTC. Adjust by timezone offset.
-    const now = new Date();
-    const localTimestamp = Math.floor(now.getTime() / 1000) - (now.getTimezoneOffset() * 60);
-    console.log('[SetTime] UTC:', Math.floor(now.getTime() / 1000), 'Local:', localTimestamp, 'Offset min:', now.getTimezoneOffset());
+    // Set timezone first (offset in seconds from UTC)
+    const tzOffsetSeconds = -(new Date().getTimezoneOffset() * 60); // JS gives minutes, inverted sign
+    console.log('[SetTime] Setting timezone offset:', tzOffsetSeconds, 'seconds (', tzOffsetSeconds / 3600, 'hours)');
+    await adapter.httpRequest(proto, device.ip_address, device.port, '/set_configuration.fcgi',
+      JSON.stringify({ general: { timezone: tzOffsetSeconds } }), 10000, loginRes.session).catch(() => {});
+
+    // Set time as UTC Unix timestamp
+    const now = Math.floor(Date.now() / 1000);
+    console.log('[SetTime] Setting UTC timestamp:', now);
     const result = await adapter.httpRequest(proto, device.ip_address, device.port, '/set_system_time.fcgi',
-      JSON.stringify({ time: localTimestamp }), 10000, loginRes.session);
+      JSON.stringify({ time: now }), 10000, loginRes.session);
     console.log('[SetTime] Response:', JSON.stringify(result));
     await adapter.httpRequest(proto, device.ip_address, device.port, '/logout.fcgi', '{}', 5000, loginRes.session).catch(() => {});
 
