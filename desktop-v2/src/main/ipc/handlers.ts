@@ -295,8 +295,9 @@ export function registerIpcHandlers(getWindow: () => BrowserWindow | null): void
     if (isDefault) {
       run('UPDATE credentials SET is_default = 0 WHERE is_default = 1');
     }
-    run(`INSERT INTO credentials (id, name, username, password, is_default) VALUES (?,?,?,?,?)`,
-      [id, name, username, encrypt(password), isDefault ? 1 : 0]);
+    const ts = nowLocal();
+    run(`INSERT INTO credentials (id, name, username, password, is_default, created_at, updated_at) VALUES (?,?,?,?,?,?,?)`,
+      [id, name, username, encrypt(password), isDefault ? 1 : 0, ts, ts]);
     return queryOne('SELECT id, name, username, is_default, created_at FROM credentials WHERE id = ?', [id]);
   });
 
@@ -632,8 +633,8 @@ export function registerIpcHandlers(getWindow: () => BrowserWindow | null): void
     console.log('[Template] Full config:', JSON.stringify(config, null, 2));
 
     const id = uuid();
-    run(`INSERT INTO config_templates (id, name, manufacturer, model, config) VALUES (?,?,?,?,?)`,
-      [id, templateName, device.manufacturer, device.model, JSON.stringify(config)]);
+    run(`INSERT INTO config_templates (id, name, manufacturer, model, config, created_at, updated_at) VALUES (?,?,?,?,?,?,?)`,
+      [id, templateName, device.manufacturer, device.model, JSON.stringify(config), nowLocal(), nowLocal()]);
     const ts = nowLocal();
     run(`INSERT INTO audit_logs (id, action, category, device_id, device_name, details, severity, created_at) VALUES (?,?,?,?,?,?,?,?)`,
       [uuid(), 'template_created', 'config', deviceId, device.name, `Template "${templateName}" from ${device.name}`, 'info', ts]);
@@ -642,8 +643,8 @@ export function registerIpcHandlers(getWindow: () => BrowserWindow | null): void
 
   ipcMain.handle('templates:create', (_e, data: any) => {
     const id = uuid();
-    run(`INSERT INTO config_templates (id, name, manufacturer, model, config) VALUES (?,?,?,?,?)`,
-      [id, data.name, data.manufacturer || 'controlid', data.model || null, JSON.stringify(data.config || {})]);
+    run(`INSERT INTO config_templates (id, name, manufacturer, model, config, created_at, updated_at) VALUES (?,?,?,?,?,?,?)`,
+      [id, data.name, data.manufacturer || 'controlid', data.model || null, JSON.stringify(data.config || {}), nowLocal(), nowLocal()]);
     return queryOne('SELECT * FROM config_templates WHERE id = ?', [id]);
   });
 
