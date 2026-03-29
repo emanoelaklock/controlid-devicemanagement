@@ -5,6 +5,8 @@ const nav: { id: Page; label: string; icon: string }[] = [
   { id: 'devices', label: 'Devices', icon: '🖥️' },
   { id: 'discovery', label: 'Discovery', icon: '🔍' },
   { id: 'people', label: 'People', icon: '👤' },
+  { id: 'templates', label: 'Templates', icon: '📄' },
+  { id: 'firmware', label: 'Firmware', icon: '⬆️' },
   { id: 'jobs', label: 'Tasks', icon: '📋' },
   { id: 'credentials', label: 'Credentials', icon: '🔑' },
   { id: 'audit', label: 'Audit Log', icon: '📜' },

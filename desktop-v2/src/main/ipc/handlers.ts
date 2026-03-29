@@ -406,6 +406,101 @@ export function registerIpcHandlers(getWindow: () => BrowserWindow | null): void
     return ok;
   });
 
+  // ─── Config Templates ──────────────────────────────────────────
+
+  ipcMain.handle('templates:list', () => {
+    return query('SELECT * FROM config_templates ORDER BY name ASC');
+  });
+
+  ipcMain.handle('templates:create-from-device', async (_e, { deviceId, templateName }: any) => {
+    const device = queryOne(`SELECT d.*, c.username, c.password as cred_password
+      FROM devices d LEFT JOIN credentials c ON d.credential_id = c.id WHERE d.id = ?`, [deviceId]);
+    if (!device) throw new Error('Device not found');
+    const adapter = adapterRegistry.get(device.manufacturer);
+    if (!adapter) throw new Error('No adapter');
+    const conn: DeviceConnection = { ip: device.ip_address, port: device.port,
+      username: device.username || 'admin', password: device.cred_password ? decrypt(device.cred_password) : '' };
+    const config = await adapter.getConfig(conn);
+    const id = uuid();
+    run(`INSERT INTO config_templates (id, name, manufacturer, model, config) VALUES (?,?,?,?,?)`,
+      [id, templateName, device.manufacturer, device.model, JSON.stringify(config)]);
+    run(`INSERT INTO audit_logs (id, action, category, device_id, device_name, details, severity) VALUES (?,?,?,?,?,?,?)`,
+      [uuid(), 'template_created', 'config', deviceId, device.name, `Template "${templateName}" from ${device.name}`, 'info']);
+    return queryOne('SELECT * FROM config_templates WHERE id = ?', [id]);
+  });
+
+  ipcMain.handle('templates:create', (_e, data: any) => {
+    const id = uuid();
+    run(`INSERT INTO config_templates (id, name, manufacturer, model, config) VALUES (?,?,?,?,?)`,
+      [id, data.name, data.manufacturer || 'controlid', data.model || null, JSON.stringify(data.config || {})]);
+    return queryOne('SELECT * FROM config_templates WHERE id = ?', [id]);
+  });
+
+  ipcMain.handle('templates:delete', (_e, id: string) => {
+    run('DELETE FROM config_templates WHERE id = ?', [id]);
+  });
+
+  ipcMain.handle('templates:get', (_e, id: string) => {
+    return queryOne('SELECT * FROM config_templates WHERE id = ?', [id]);
+  });
+
+  ipcMain.handle('templates:apply', async (_e, { templateId, deviceIds }: any) => {
+    const template = queryOne('SELECT * FROM config_templates WHERE id = ?', [templateId]);
+    if (!template) throw new Error('Template not found');
+    const config = JSON.parse(template.config);
+    return jobService.createJob('batch_config', `Apply template "${template.name}" to ${deviceIds.length} devices`, deviceIds,
+      async (conn, device) => {
+        const adapter = adapterRegistry.get(device.manufacturer);
+        if (!adapter) throw new Error('No adapter');
+        if (device.manufacturer !== template.manufacturer) throw new Error(`Manufacturer mismatch: device is ${device.manufacturer}, template is ${template.manufacturer}`);
+        const ok = await adapter.setConfig(conn, config);
+        if (!ok) throw new Error('Failed to apply configuration');
+        run(`INSERT INTO audit_logs (id, action, category, device_id, device_name, details, severity) VALUES (?,?,?,?,?,?,?)`,
+          [uuid(), 'template_applied', 'config', device.id, device.name, `Template "${template.name}" applied`, 'info']);
+        return `Template "${template.name}" applied successfully`;
+      }, getWindow());
+  });
+
+  // ─── Firmware Management ────────────────────────────────────────
+
+  ipcMain.handle('firmware:summary', () => {
+    const devices = query('SELECT id, name, ip_address, model, firmware_version, status, manufacturer FROM devices ORDER BY firmware_version DESC');
+    const versions = new Map<string, any[]>();
+    devices.forEach((d: any) => {
+      const v = d.firmware_version || 'Unknown';
+      const list = versions.get(v) || [];
+      list.push(d);
+      versions.set(v, list);
+    });
+    const sorted = Array.from(versions.entries()).sort((a, b) => b[0].localeCompare(a[0]));
+    const latest = sorted[0]?.[0] !== 'Unknown' ? sorted[0]?.[0] : sorted[1]?.[0] ?? null;
+    return {
+      total: devices.length,
+      latest,
+      versions: sorted.map(([version, devs]) => ({
+        version, count: devs.length, isLatest: version === latest,
+        devices: devs.map((d: any) => ({ id: d.id, name: d.name, ip_address: d.ip_address, status: d.status })),
+      })),
+      outdated: devices.filter((d: any) => d.firmware_version && d.firmware_version !== latest && d.firmware_version !== 'Unknown'),
+    };
+  });
+
+  ipcMain.handle('firmware:check-all', async (_e, deviceIds: string[]) => {
+    return jobService.createJob('health_check', `Check firmware on ${deviceIds.length} devices`, deviceIds,
+      async (conn, device) => {
+        const adapter = adapterRegistry.get(device.manufacturer);
+        if (!adapter) throw new Error('No adapter');
+        const info = await adapter.authenticate(conn.ip, conn.port, conn.username, conn.password);
+        if (info) {
+          run(`UPDATE devices SET firmware_version=?, model=?, serial_number=?, mac_address=?,
+            status='online', last_heartbeat=datetime('now'), updated_at=datetime('now') WHERE id=?`,
+            [info.firmwareVersion, info.model, info.serialNumber, info.macAddress, device.id]);
+          return `${info.model} - firmware ${info.firmwareVersion}`;
+        }
+        throw new Error('Could not connect');
+      }, getWindow());
+  });
+
   // ─── Network Configuration ──────────────────────────────────────
 
   ipcMain.handle('devices:set-network', async (_e, { id, network }: any) => {

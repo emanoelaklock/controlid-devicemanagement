@@ -20,6 +20,8 @@ contextBridge.exposeInMainWorld('api', {
       'groups:list', 'groups:create', 'groups:delete',
       'dashboard:stats',
       'config:backup', 'config:backups', 'config:restore',
+      'templates:list', 'templates:create-from-device', 'templates:create', 'templates:delete', 'templates:get', 'templates:apply',
+      'firmware:summary', 'firmware:check-all',
       'shell:open-url',
       'export:devices-csv', 'export:audit-csv',
     ];

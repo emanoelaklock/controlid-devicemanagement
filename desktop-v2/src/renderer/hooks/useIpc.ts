@@ -68,6 +68,18 @@ export const ipc = {
   listBackups: (deviceId: string) => window.api.invoke('config:backups', deviceId),
   restoreConfig: (deviceId: string, backupId: string) => window.api.invoke('config:restore', { deviceId, backupId }),
 
+  // Templates
+  listTemplates: () => window.api.invoke('templates:list'),
+  createTemplateFromDevice: (deviceId: string, templateName: string) => window.api.invoke('templates:create-from-device', { deviceId, templateName }),
+  createTemplate: (data: any) => window.api.invoke('templates:create', data),
+  getTemplate: (id: string) => window.api.invoke('templates:get', id),
+  deleteTemplate: (id: string) => window.api.invoke('templates:delete', id),
+  applyTemplate: (templateId: string, deviceIds: string[]) => window.api.invoke('templates:apply', { templateId, deviceIds }),
+
+  // Firmware
+  firmwareSummary: () => window.api.invoke('firmware:summary'),
+  firmwareCheckAll: (deviceIds: string[]) => window.api.invoke('firmware:check-all', deviceIds),
+
   // Export
   exportDevicesCsv: () => window.api.invoke('export:devices-csv'),
   exportAuditCsv: () => window.api.invoke('export:audit-csv'),

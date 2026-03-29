@@ -346,6 +346,12 @@ export default function DevicesPage() {
               className="w-full px-3 py-2 bg-amber-600 text-white text-xs rounded-lg hover:bg-amber-700 disabled:opacity-40 disabled:cursor-not-allowed">Reboot</button>
             <button onClick={() => ipc.backupConfig(detail.id)} disabled={!detail.credential_id}
               className="w-full px-3 py-2 bg-slate-700 text-white text-xs rounded-lg hover:bg-slate-600 disabled:opacity-40 disabled:cursor-not-allowed">Backup Config</button>
+            <button onClick={async () => {
+              const name = prompt('Template name:', `${detail.model || 'Device'} Config`);
+              if (!name) return;
+              try { await ipc.createTemplateFromDevice(detail.id, name); alert(`Template "${name}" created`); } catch (e: any) { alert(e.message); }
+            }} disabled={!detail.credential_id}
+              className="w-full px-3 py-2 bg-slate-700 text-white text-xs rounded-lg hover:bg-slate-600 disabled:opacity-40 disabled:cursor-not-allowed">Save as Template</button>
             <button onClick={() => handleDelete(detail.id)}
               className="w-full px-3 py-2 bg-red-700/60 text-red-200 text-xs rounded-lg hover:bg-red-700">Delete Device</button>
           </div>
