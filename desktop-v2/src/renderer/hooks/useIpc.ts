@@ -23,6 +23,7 @@ export const ipc = {
   // Batch
   batchReboot: (ids: string[]) => window.api.invoke('batch:reboot', ids),
   batchTestConnection: (ids: string[]) => window.api.invoke('batch:test-connection', ids),
+  batchBackup: (ids: string[]) => window.api.invoke('batch:backup', ids),
 
   // Discovery
   startScan: (request: any) => window.api.invoke('discovery:scan', request),
@@ -54,6 +55,10 @@ export const ipc = {
   backupConfig: (deviceId: string) => window.api.invoke('config:backup', deviceId),
   listBackups: (deviceId: string) => window.api.invoke('config:backups', deviceId),
   restoreConfig: (deviceId: string, backupId: string) => window.api.invoke('config:restore', { deviceId, backupId }),
+
+  // Export
+  exportDevicesCsv: () => window.api.invoke('export:devices-csv'),
+  exportAuditCsv: () => window.api.invoke('export:audit-csv'),
 
   // Events - must be lazy to ensure window.api is available
   on: (channel: string, callback: (...args: any[]) => void) => {

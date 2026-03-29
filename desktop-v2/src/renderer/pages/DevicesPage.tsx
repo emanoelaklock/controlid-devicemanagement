@@ -154,9 +154,13 @@ export default function DevicesPage() {
             <div className="flex items-center gap-2">
               <span className="text-xs text-brand-400">{selected.size} selected</span>
               <button onClick={handleBatchTest} className="px-3 py-1.5 bg-blue-600 text-white text-xs rounded-lg hover:bg-blue-700">Test</button>
+              <button onClick={() => ipc.batchBackup(Array.from(selected))} className="px-3 py-1.5 bg-slate-600 text-white text-xs rounded-lg hover:bg-slate-500">Backup</button>
               <button onClick={handleBatchReboot} className="px-3 py-1.5 bg-amber-600 text-white text-xs rounded-lg hover:bg-amber-700">Reboot</button>
             </div>
           )}
+          <button onClick={() => ipc.exportDevicesCsv()} className="px-3 py-1.5 bg-slate-700 text-white text-xs rounded-lg hover:bg-slate-600">
+            Export CSV
+          </button>
           <button onClick={() => setShowAdd(!showAdd)} className="px-3 py-1.5 bg-brand-600 text-white text-xs rounded-lg hover:bg-brand-700">
             {showAdd ? 'Cancel' : '+ Add Device'}
           </button>

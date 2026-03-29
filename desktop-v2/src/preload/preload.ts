@@ -10,7 +10,7 @@ contextBridge.exposeInMainWorld('api', {
     const allowedChannels = [
       'devices:list', 'devices:get', 'devices:create', 'devices:update', 'devices:delete',
       'devices:test-connection', 'devices:reboot', 'devices:open-door',
-      'batch:reboot', 'batch:test-connection',
+      'batch:reboot', 'batch:test-connection', 'batch:backup',
       'discovery:scan', 'discovery:cancel',
       'credentials:list', 'credentials:create', 'credentials:update', 'credentials:delete', 'credentials:set-default',
       'jobs:list', 'jobs:get', 'jobs:cancel',
@@ -19,6 +19,7 @@ contextBridge.exposeInMainWorld('api', {
       'dashboard:stats',
       'config:backup', 'config:backups', 'config:restore',
       'shell:open-url',
+      'export:devices-csv', 'export:audit-csv',
     ];
     if (!allowedChannels.includes(channel)) {
       throw new Error(`IPC channel not allowed: ${channel}`);

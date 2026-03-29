@@ -1,5 +1,6 @@
-import { ipcMain, BrowserWindow, shell } from 'electron';
+import { ipcMain, BrowserWindow, shell, dialog } from 'electron';
 import { v4 as uuid } from 'uuid';
+import fs from 'fs';
 import { query, queryOne, run, count, insertAndReturn } from '../db/queries';
 import { discoveryService } from '../services/discovery.service';
 import { jobService } from '../services/job.service';
@@ -134,6 +135,19 @@ export function registerIpcHandlers(getWindow: () => BrowserWindow | null): void
         }
         run(`UPDATE devices SET status='unreachable' WHERE id=?`, [device.id]);
         throw new Error('Could not connect');
+      }, getWindow());
+  });
+
+  ipcMain.handle('batch:backup', async (_e, deviceIds: string[]) => {
+    return jobService.createJob('config_backup', `Backup ${deviceIds.length} devices`, deviceIds,
+      async (conn, device) => {
+        const adapter = adapterRegistry.get(device.manufacturer);
+        if (!adapter) throw new Error('No adapter');
+        const config = await adapter.getConfig(conn);
+        const version = count('SELECT COUNT(*) as c FROM config_backups WHERE device_id = ?', [device.id]) + 1;
+        run(`INSERT INTO config_backups (id, device_id, device_name, config, version) VALUES (?,?,?,?,?)`,
+          [uuid(), device.id, device.name, JSON.stringify(config), version]);
+        return `Backup v${version} saved`;
       }, getWindow());
   });
 
@@ -280,5 +294,68 @@ export function registerIpcHandlers(getWindow: () => BrowserWindow | null): void
     if (url.startsWith('http://') || url.startsWith('https://')) {
       shell.openExternal(url);
     }
+  });
+
+  // ─── Export ────────────────────────────────────────────────────
+
+  ipcMain.handle('export:devices-csv', async () => {
+    const win = getWindow();
+    if (!win) return false;
+
+    const { filePath } = await dialog.showSaveDialog(win, {
+      title: 'Export Devices',
+      defaultPath: `devices_${new Date().toISOString().split('T')[0]}.csv`,
+      filters: [{ name: 'CSV', extensions: ['csv'] }],
+    });
+
+    if (!filePath) return false;
+
+    const devices = query(`SELECT d.*, c.name as credential_name, g.name as group_name
+      FROM devices d LEFT JOIN credentials c ON d.credential_id = c.id
+      LEFT JOIN device_groups g ON d.group_id = g.id ORDER BY d.name ASC`);
+
+    const headers = ['Name', 'IP Address', 'Port', 'Model', 'Serial Number', 'MAC Address',
+      'Firmware', 'Status', 'Manufacturer', 'Hostname', 'HTTPS', 'DHCP', 'Credential',
+      'Group', 'Last Heartbeat', 'Notes'];
+
+    const rows = devices.map((d: any) => [
+      d.name, d.ip_address, d.port, d.model, d.serial_number, d.mac_address,
+      d.firmware_version, d.status, d.manufacturer, d.hostname,
+      d.https_enabled ? 'Yes' : 'No', d.dhcp_enabled ? 'Yes' : 'No',
+      d.credential_name || '', d.group_name || '',
+      d.last_heartbeat || '', d.notes || '',
+    ]);
+
+    const escape = (v: any) => {
+      const s = String(v ?? '');
+      return s.includes(',') || s.includes('"') || s.includes('\n') ? `"${s.replace(/"/g, '""')}"` : s;
+    };
+
+    const csv = [headers.join(','), ...rows.map((r: any[]) => r.map(escape).join(','))].join('\n');
+    fs.writeFileSync(filePath, '\uFEFF' + csv, 'utf-8'); // BOM for Excel compatibility
+    shell.showItemInFolder(filePath);
+    return true;
+  });
+
+  ipcMain.handle('export:audit-csv', async () => {
+    const win = getWindow();
+    if (!win) return false;
+
+    const { filePath } = await dialog.showSaveDialog(win, {
+      title: 'Export Audit Log',
+      defaultPath: `audit_log_${new Date().toISOString().split('T')[0]}.csv`,
+      filters: [{ name: 'CSV', extensions: ['csv'] }],
+    });
+
+    if (!filePath) return false;
+
+    const logs = query('SELECT * FROM audit_logs ORDER BY created_at DESC');
+    const headers = ['Timestamp', 'Action', 'Category', 'Severity', 'Device', 'Details'];
+    const rows = logs.map((l: any) => [l.created_at, l.action, l.category, l.severity, l.device_name || '', l.details || '']);
+    const escape = (v: any) => { const s = String(v ?? ''); return s.includes(',') || s.includes('"') || s.includes('\n') ? `"${s.replace(/"/g, '""')}"` : s; };
+    const csv = [headers.join(','), ...rows.map((r: any[]) => r.map(escape).join(','))].join('\n');
+    fs.writeFileSync(filePath, '\uFEFF' + csv, 'utf-8');
+    shell.showItemInFolder(filePath);
+    return true;
   });
 }

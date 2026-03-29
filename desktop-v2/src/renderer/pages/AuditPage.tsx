@@ -17,6 +17,10 @@ export default function AuditPage() {
     <div className="p-6">
       <div className="flex items-center justify-between mb-6">
         <h1 className="text-xl font-bold text-white">Audit Log</h1>
+        <div className="flex items-center gap-3">
+        <button onClick={() => ipc.exportAuditCsv()} className="px-3 py-1.5 bg-slate-700 text-white text-xs rounded-lg hover:bg-slate-600">
+          Export CSV
+        </button>
         <select value={category} onChange={e => setCategory(e.target.value)}
           className="px-3 py-1.5 bg-slate-800 border border-slate-700 rounded-lg text-sm text-white">
           <option value="">All Categories</option>
@@ -25,6 +29,7 @@ export default function AuditPage() {
           <option value="credential">Credentials</option>
           <option value="system">System</option>
         </select>
+        </div>
       </div>
 
       <div className="bg-slate-800 rounded-xl border border-slate-700 overflow-hidden">
