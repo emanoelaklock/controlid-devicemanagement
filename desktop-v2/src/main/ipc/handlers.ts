@@ -1,7 +1,7 @@
 import { ipcMain, BrowserWindow, shell, dialog } from 'electron';
 import { v4 as uuid } from 'uuid';
 import fs from 'fs';
-import { query, queryOne, run, count, insertAndReturn } from '../db/queries';
+import { query, queryOne, run, count, insertAndReturn, nowLocal } from '../db/queries';
 import { discoveryService } from '../services/discovery.service';
 import { jobService } from '../services/job.service';
 import { adapterRegistry } from '../adapters/registry';
@@ -40,7 +40,7 @@ export function registerIpcHandlers(getWindow: () => BrowserWindow | null): void
     const fields = Object.entries(data).filter(([_, v]) => v !== undefined);
     if (fields.length === 0) return existing;
     const setClause = fields.map(([k]) => `${k}=?`).join(',');
-    run(`UPDATE devices SET ${setClause}, updated_at=datetime('now','localtime') WHERE id=?`,
+    run(`UPDATE devices SET ${setClause}, updated_at='${nowLocal()}' WHERE id=?`,
       [...fields.map(([_, v]) => v), id]);
     return queryOne('SELECT * FROM devices WHERE id = ?', [id]);
   });
@@ -68,8 +68,8 @@ export function registerIpcHandlers(getWindow: () => BrowserWindow | null): void
     if (info) {
       console.log('[TestConnection] DeviceInfo returned:', JSON.stringify(info));
       run(`UPDATE devices SET status='online', firmware_version=?, model=?, serial_number=?,
-        mac_address=?, last_heartbeat=datetime('now','localtime'), https_enabled=?, dhcp_enabled=?,
-        hostname=?, updated_at=datetime('now','localtime') WHERE id=?`,
+        mac_address=?, last_heartbeat='${nowLocal()}', https_enabled=?, dhcp_enabled=?,
+        hostname=?, updated_at='${nowLocal()}' WHERE id=?`,
         [info.firmwareVersion, info.model, info.serialNumber, info.macAddress,
          info.httpsEnabled ? 1 : 0, info.dhcpEnabled ? 1 : 0, info.hostname, id]);
 
@@ -80,7 +80,7 @@ export function registerIpcHandlers(getWindow: () => BrowserWindow | null): void
       return { connected: true, info };
     }
 
-    run(`UPDATE devices SET status='unreachable', updated_at=datetime('now','localtime') WHERE id=?`, [id]);
+    run(`UPDATE devices SET status='unreachable', updated_at='${nowLocal()}' WHERE id=?`, [id]);
     return { connected: false };
   });
 
@@ -155,7 +155,7 @@ export function registerIpcHandlers(getWindow: () => BrowserWindow | null): void
       JSON.stringify(payload), 10000, loginRes.session);
     console.log('[FactoryReset] Response:', JSON.stringify(result));
 
-    run(`UPDATE devices SET status='offline', updated_at=datetime('now','localtime') WHERE id=?`, [id]);
+    run(`UPDATE devices SET status='offline', updated_at='${nowLocal()}' WHERE id=?`, [id]);
     run(`INSERT INTO audit_logs (id, action, category, device_id, device_name, details, severity) VALUES (?,?,?,?,?,?,?)`,
       [uuid(), 'factory_reset', 'device', id, device.name,
        `Factory reset${keepNetwork ? ' (network preserved)' : ' (full reset)'}`, 'critical']);
@@ -183,8 +183,8 @@ export function registerIpcHandlers(getWindow: () => BrowserWindow | null): void
         const info = await adapter.authenticate(conn.ip, conn.port, conn.username, conn.password);
         if (info) {
           run(`UPDATE devices SET status='online', firmware_version=?, model=?, serial_number=?,
-            mac_address=?, last_heartbeat=datetime('now','localtime'), https_enabled=?, dhcp_enabled=?,
-            hostname=?, updated_at=datetime('now','localtime') WHERE id=?`,
+            mac_address=?, last_heartbeat='${nowLocal()}', https_enabled=?, dhcp_enabled=?,
+            hostname=?, updated_at='${nowLocal()}' WHERE id=?`,
             [info.firmwareVersion, info.model, info.serialNumber, info.macAddress,
              info.httpsEnabled ? 1 : 0, info.dhcpEnabled ? 1 : 0, info.hostname, device.id]);
           return `Online - ${info.model} v${info.firmwareVersion} MAC:${info.macAddress || 'N/A'}`;
@@ -242,7 +242,7 @@ export function registerIpcHandlers(getWindow: () => BrowserWindow | null): void
   ipcMain.handle('credentials:update', (_e, { id, data }: any) => {
     const existing = queryOne('SELECT * FROM credentials WHERE id = ?', [id]);
     if (!existing) throw new Error('Credential not found');
-    run(`UPDATE credentials SET name=?, username=?, password=?, updated_at=datetime('now','localtime') WHERE id=?`,
+    run(`UPDATE credentials SET name=?, username=?, password=?, updated_at='${nowLocal()}' WHERE id=?`,
       [data.name ?? existing.name, data.username ?? existing.username,
        data.password ? encrypt(data.password) : existing.password, id]);
     return queryOne('SELECT id, name, username, is_default FROM credentials WHERE id = ?', [id]);
@@ -287,7 +287,7 @@ export function registerIpcHandlers(getWindow: () => BrowserWindow | null): void
   ipcMain.handle('people:update', (_e, { id, data }: any) => {
     const existing = queryOne('SELECT * FROM people WHERE id = ?', [id]);
     if (!existing) throw new Error('Person not found');
-    run(`UPDATE people SET name=?, registration=?, card_number=?, pin_code=?, active=?, group_name=?, notes=?, updated_at=datetime('now','localtime') WHERE id=?`,
+    run(`UPDATE people SET name=?, registration=?, card_number=?, pin_code=?, active=?, group_name=?, notes=?, updated_at='${nowLocal()}' WHERE id=?`,
       [data.name ?? existing.name, data.registration ?? existing.registration, data.card_number ?? existing.card_number,
        data.pin_code ?? existing.pin_code, data.active !== undefined ? (data.active ? 1 : 0) : existing.active,
        data.group_name ?? existing.group_name, data.notes ?? existing.notes, id]);
@@ -337,7 +337,7 @@ export function registerIpcHandlers(getWindow: () => BrowserWindow | null): void
             JSON.stringify({ object: 'cards', values: [{ user_id: parseInt(person.registration, 10), value: parseInt(person.card_number, 10) }] }), 10000, loginRes.session);
         }
         await controlId.httpRequest(proto, device.ip_address, device.port, '/logout.fcgi', '{}', 5000, loginRes.session).catch(() => {});
-        run("UPDATE person_devices SET synced = 1, synced_at = datetime('now','localtime') WHERE person_id = ? AND device_id = ?", [personId, deviceId]);
+        run("UPDATE person_devices SET synced = 1, synced_at = '${nowLocal()}' WHERE person_id = ? AND device_id = ?", [personId, deviceId]);
         return true;
       }
     }
@@ -363,7 +363,7 @@ export function registerIpcHandlers(getWindow: () => BrowserWindow | null): void
             await adapter.httpRequest(proto, device.ip_address, device.port, '/create_objects.fcgi',
               JSON.stringify({ object: 'cards', values: [{ user_id: parseInt(person.registration, 10), value: parseInt(person.card_number, 10) }] }), 10000, loginRes.session);
           }
-          run("UPDATE person_devices SET synced = 1, synced_at = datetime('now','localtime') WHERE person_id = ? AND device_id = ?", [personId, device.id]);
+          run("UPDATE person_devices SET synced = 1, synced_at = '${nowLocal()}' WHERE person_id = ? AND device_id = ?", [personId, device.id]);
           synced++;
         }
         await adapter.httpRequest(proto, device.ip_address, device.port, '/logout.fcgi', '{}', 5000, loginRes.session).catch(() => {});
@@ -562,7 +562,7 @@ export function registerIpcHandlers(getWindow: () => BrowserWindow | null): void
         const info = await adapter.authenticate(conn.ip, conn.port, conn.username, conn.password);
         if (info) {
           run(`UPDATE devices SET firmware_version=?, model=?, serial_number=?, mac_address=?,
-            status='online', last_heartbeat=datetime('now','localtime'), updated_at=datetime('now','localtime') WHERE id=?`,
+            status='online', last_heartbeat='${nowLocal()}', updated_at='${nowLocal()}' WHERE id=?`,
             [info.firmwareVersion, info.model, info.serialNumber, info.macAddress, device.id]);
           return `${info.model} - firmware ${info.firmwareVersion}`;
         }
@@ -631,7 +631,7 @@ export function registerIpcHandlers(getWindow: () => BrowserWindow | null): void
 
     // Update local DB
     const newIp = network.ip || device.ip_address;
-    run(`UPDATE devices SET ip_address=?, dhcp_enabled=?, status='offline', updated_at=datetime('now','localtime') WHERE id=?`,
+    run(`UPDATE devices SET ip_address=?, dhcp_enabled=?, status='offline', updated_at='${nowLocal()}' WHERE id=?`,
       [network.dhcp ? device.ip_address : newIp, network.dhcp ? 1 : 0, id]);
     run(`INSERT INTO audit_logs (id, action, category, device_id, device_name, details, severity) VALUES (?,?,?,?,?,?,?)`,
       [uuid(), 'network_changed', 'device', id, device.name,

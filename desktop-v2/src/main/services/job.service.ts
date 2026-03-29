@@ -1,7 +1,7 @@
 import { v4 as uuid } from 'uuid';
 import { BrowserWindow } from 'electron';
 import { Job, JobItem, JobType, DeviceConnection } from '../types';
-import { query, queryOne, run } from '../db/queries';
+import { query, queryOne, run, nowLocal } from '../db/queries';
 import { adapterRegistry } from '../adapters/registry';
 import { decrypt } from '../utils/encryption';
 
@@ -22,7 +22,7 @@ export class JobService {
   ): Promise<string> {
     const jobId = uuid();
 
-    run(`INSERT INTO jobs (id, type, status, title, total_items, started_at) VALUES (?,?,'running',?,?,datetime('now','localtime'))`,
+    run(`INSERT INTO jobs (id, type, status, title, total_items, started_at) VALUES (?,?,'running',?,?,'${nowLocal()}')`,
       [jobId, type, title, deviceIds.length]);
 
     // Create job items
@@ -37,7 +37,7 @@ export class JobService {
     // Execute async
     this.executeJob(jobId, deviceIds, executor, state, window).catch(err => {
       console.error(`[Job ${jobId}] Failed:`, err);
-      run(`UPDATE jobs SET status='failed', completed_at=datetime('now','localtime') WHERE id=?`, [jobId]);
+      run(`UPDATE jobs SET status='failed', completed_at='${nowLocal()}' WHERE id=?`, [jobId]);
     });
 
     return jobId;
@@ -47,7 +47,7 @@ export class JobService {
     const job = this.activeJobs.get(jobId);
     if (job) {
       job.cancelled = true;
-      run(`UPDATE jobs SET status='cancelled', cancelled_at=datetime('now','localtime') WHERE id=?`, [jobId]);
+      run(`UPDATE jobs SET status='cancelled', cancelled_at='${nowLocal()}' WHERE id=?`, [jobId]);
     }
   }
 
@@ -82,7 +82,7 @@ export class JobService {
         continue;
       }
 
-      run(`UPDATE job_items SET status='running', started_at=datetime('now','localtime') WHERE job_id=? AND device_id=?`, [jobId, deviceId]);
+      run(`UPDATE job_items SET status='running', started_at='${nowLocal()}' WHERE job_id=? AND device_id=?`, [jobId, deviceId]);
 
       try {
         const conn: DeviceConnection = {
@@ -95,11 +95,11 @@ export class JobService {
         const message = await executor(conn, device);
         completed++;
 
-        run(`UPDATE job_items SET status='success', message=?, completed_at=datetime('now','localtime') WHERE job_id=? AND device_id=?`,
+        run(`UPDATE job_items SET status='success', message=?, completed_at='${nowLocal()}' WHERE job_id=? AND device_id=?`,
           [message, jobId, deviceId]);
       } catch (err: any) {
         failed++;
-        run(`UPDATE job_items SET status='failed', message=?, completed_at=datetime('now','localtime') WHERE job_id=? AND device_id=?`,
+        run(`UPDATE job_items SET status='failed', message=?, completed_at='${nowLocal()}' WHERE job_id=? AND device_id=?`,
           [err.message || 'Unknown error', jobId, deviceId]);
       }
 
@@ -113,7 +113,7 @@ export class JobService {
     }
 
     const finalStatus = state.cancelled ? 'cancelled' : (failed === deviceIds.length ? 'failed' : 'completed');
-    run(`UPDATE jobs SET status=?, completed_at=datetime('now','localtime'), progress=100 WHERE id=?`, [finalStatus, jobId]);
+    run(`UPDATE jobs SET status=?, completed_at='${nowLocal()}', progress=100 WHERE id=?`, [finalStatus, jobId]);
 
     if (window && !window.isDestroyed()) {
       window.webContents.send('job:complete', { jobId, status: finalStatus, completed, failed });

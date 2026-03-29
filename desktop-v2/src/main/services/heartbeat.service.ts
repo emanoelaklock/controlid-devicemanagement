@@ -1,7 +1,7 @@
 import net from 'net';
 import { v4 as uuid } from 'uuid';
 import { BrowserWindow } from 'electron';
-import { query, queryOne, run } from '../db/queries';
+import { query, queryOne, run, nowLocal } from '../db/queries';
 import { saveDb } from '../db/database';
 import { adapterRegistry } from '../adapters/registry';
 
@@ -43,12 +43,12 @@ export class HeartbeatService {
           if (reachable) {
             this.offlineCounters.delete(device.id);
             if (device.status !== 'online') {
-              run(`UPDATE devices SET status='online', last_heartbeat=datetime('now','localtime'), updated_at=datetime('now','localtime') WHERE id=?`, [device.id]);
-              // Log connection restored
-              run(`INSERT INTO connection_history (id, device_id, event) VALUES (?, ?, 'online')`, [uuid(), device.id]);
+              const ts = nowLocal();
+              run(`UPDATE devices SET status='online', last_heartbeat=?, updated_at=? WHERE id=?`, [ts, ts, device.id]);
+              run(`INSERT INTO connection_history (id, device_id, event, timestamp) VALUES (?, ?, 'online', ?)`, [uuid(), device.id, ts]);
               changed = true;
             } else {
-              run(`UPDATE devices SET last_heartbeat=datetime('now','localtime') WHERE id=?`, [device.id]);
+              run(`UPDATE devices SET last_heartbeat=? WHERE id=?`, [nowLocal(), device.id]);
             }
             return { id: device.id, status: 'online' };
           }
@@ -58,9 +58,9 @@ export class HeartbeatService {
           this.offlineCounters.set(device.id, offlineCount);
 
           if (device.status !== 'offline') {
-            run(`UPDATE devices SET status='offline', updated_at=datetime('now','localtime') WHERE id=?`, [device.id]);
-            // Log connection lost
-            run(`INSERT INTO connection_history (id, device_id, event) VALUES (?, ?, 'offline')`, [uuid(), device.id]);
+            const ts2 = nowLocal();
+            run(`UPDATE devices SET status='offline', updated_at=? WHERE id=?`, [ts2, device.id]);
+            run(`INSERT INTO connection_history (id, device_id, event, timestamp) VALUES (?, ?, 'offline', ?)`, [uuid(), device.id, ts2]);
             changed = true;
           }
 
@@ -128,8 +128,9 @@ export class HeartbeatService {
         if (result.status === 'fulfilled' && result.value) {
           const newIp = result.value;
           console.log(`[Heartbeat] Found ${device.mac_address} at new IP: ${newIp} (was ${oldIp})`);
-          run(`UPDATE devices SET ip_address=?, status='online', last_heartbeat=datetime('now','localtime'), updated_at=datetime('now','localtime') WHERE id=?`,
-            [newIp, device.id]);
+          const ts3 = nowLocal();
+          run(`UPDATE devices SET ip_address=?, status='online', last_heartbeat=?, updated_at=? WHERE id=?`,
+            [newIp, ts3, ts3, device.id]);
           run(`INSERT INTO audit_logs (id, action, category, device_id, device_name, details, severity) VALUES (?,?,?,?,?,?,?)`,
             [require('uuid').v4(), 'ip_changed', 'device', device.id, device.name,
              `DHCP IP changed: ${oldIp} -> ${newIp}`, 'warning']);
