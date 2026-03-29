@@ -64,9 +64,10 @@ export class HeartbeatService {
             changed = true;
           }
 
-          // If DHCP device is offline for 3+ cycles and has a MAC, try to find new IP
-          if (device.dhcp_enabled && device.mac_address && offlineCount >= 3 && offlineCount % 3 === 0) {
-            console.log(`[Heartbeat] DHCP device ${device.mac_address} offline for ${offlineCount} cycles, scanning for new IP...`);
+          // If device is offline for 3+ cycles and has a MAC, try to find new IP
+          // Works for both DHCP and manual IP changes (via web interface)
+          if (device.mac_address && offlineCount >= 3 && offlineCount % 6 === 0) {
+            console.log(`[Heartbeat] Device ${device.mac_address} offline for ${offlineCount} cycles, scanning for new IP...`);
             this.findDeviceByMac(device).catch(() => {});
           }
 
