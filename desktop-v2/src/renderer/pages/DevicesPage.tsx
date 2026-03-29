@@ -43,11 +43,17 @@ export default function DevicesPage() {
       setDevices(devs);
       if (detailRef.current) {
         const updated = devs.find((d: any) => d.id === detailRef.current.id);
-        if (updated) { setDetail(updated); detailRef.current = updated; }
-        // Refresh connection history for selected device
+        if (updated) {
+          // Force new object reference so React re-renders
+          const fresh = { ...updated };
+          setDetail(fresh);
+          detailRef.current = fresh;
+        }
         ipc.deviceHistory(detailRef.current.id, 90).then(setHistory).catch(() => {});
       }
     });
+    ipc.listCredentials().then(setCredentials);
+    ipc.listGroups().then(setGroups);
   }, []);
 
   useEffect(() => {
