@@ -5,9 +5,10 @@ import DiscoveryPage from './pages/DiscoveryPage';
 import JobsPage from './pages/JobsPage';
 import DashboardPage from './pages/DashboardPage';
 import CredentialsPage from './pages/CredentialsPage';
+import PeoplePage from './pages/PeoplePage';
 import AuditPage from './pages/AuditPage';
 
-export type Page = 'dashboard' | 'devices' | 'discovery' | 'jobs' | 'credentials' | 'audit';
+export type Page = 'dashboard' | 'devices' | 'discovery' | 'people' | 'jobs' | 'credentials' | 'audit';
 
 export default function App() {
   const [page, setPage] = useState<Page>('dashboard');
@@ -17,6 +18,7 @@ export default function App() {
       case 'dashboard': return <DashboardPage />;
       case 'devices': return <DevicesPage />;
       case 'discovery': return <DiscoveryPage />;
+      case 'people': return <PeoplePage />;
       case 'jobs': return <JobsPage />;
       case 'credentials': return <CredentialsPage />;
       case 'audit': return <AuditPage />;

@@ -240,7 +240,8 @@ export class ControlIdAdapter implements DeviceAdapter {
   }
 
   /** POST request returning parsed JSON */
-  private httpRequest(
+  /** POST request returning parsed JSON - public for sync operations */
+  httpRequest(
     protocol: string, ip: string, port: number, path: string,
     body: string, timeoutMs: number, session?: string
   ): Promise<any> {

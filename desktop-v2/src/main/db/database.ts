@@ -172,6 +172,33 @@ function createSchema(): void {
     )
   `);
 
+  _db.run(`
+    CREATE TABLE IF NOT EXISTS people (
+      id TEXT PRIMARY KEY NOT NULL,
+      name TEXT NOT NULL,
+      registration TEXT UNIQUE NOT NULL,
+      card_number TEXT,
+      pin_code TEXT,
+      active INTEGER NOT NULL DEFAULT 1,
+      group_name TEXT,
+      notes TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    )
+  `);
+
+  _db.run(`
+    CREATE TABLE IF NOT EXISTS person_devices (
+      id TEXT PRIMARY KEY NOT NULL,
+      person_id TEXT NOT NULL REFERENCES people(id) ON DELETE CASCADE,
+      device_id TEXT NOT NULL REFERENCES devices(id) ON DELETE CASCADE,
+      synced INTEGER NOT NULL DEFAULT 0,
+      synced_at TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      UNIQUE(person_id, device_id)
+    )
+  `);
+
   _db.run(`CREATE INDEX IF NOT EXISTS idx_devices_status ON devices(status)`);
   _db.run(`CREATE INDEX IF NOT EXISTS idx_devices_ip ON devices(ip_address)`);
   _db.run(`CREATE INDEX IF NOT EXISTS idx_audit_logs_created ON audit_logs(created_at)`);

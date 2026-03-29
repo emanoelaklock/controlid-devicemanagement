@@ -196,6 +196,125 @@ export function registerIpcHandlers(getWindow: () => BrowserWindow | null): void
     run('DELETE FROM credentials WHERE id = ?', [id]);
   });
 
+  // ─── People ─────────────────────────────────────────────────────
+
+  ipcMain.handle('people:list', (_e, opts: any = {}) => {
+    let sql = 'SELECT * FROM people WHERE 1=1';
+    const params: any[] = [];
+    if (opts.search) { sql += ' AND (name LIKE ? OR registration LIKE ? OR card_number LIKE ?)'; params.push(`%${opts.search}%`, `%${opts.search}%`, `%${opts.search}%`); }
+    if (opts.active !== undefined) { sql += ' AND active = ?'; params.push(opts.active ? 1 : 0); }
+    sql += ' ORDER BY name ASC';
+    const people = query(sql, params);
+    // Attach device count
+    return people.map((p: any) => {
+      const deviceCount = count('SELECT COUNT(*) as c FROM person_devices WHERE person_id = ?', [p.id]);
+      const syncedCount = count('SELECT COUNT(*) as c FROM person_devices WHERE person_id = ? AND synced = 1', [p.id]);
+      return { ...p, active: !!p.active, deviceCount, syncedCount };
+    });
+  });
+
+  ipcMain.handle('people:get', (_e, id: string) => {
+    const person = queryOne('SELECT * FROM people WHERE id = ?', [id]);
+    if (!person) return null;
+    const devices = query(`SELECT pd.*, d.name as device_name, d.ip_address, d.status as device_status
+      FROM person_devices pd JOIN devices d ON pd.device_id = d.id WHERE pd.person_id = ?`, [id]);
+    return { ...person, active: !!person.active, devices };
+  });
+
+  ipcMain.handle('people:create', (_e, data: any) => {
+    const id = uuid();
+    run(`INSERT INTO people (id, name, registration, card_number, pin_code, active, group_name, notes) VALUES (?,?,?,?,?,?,?,?)`,
+      [id, data.name, data.registration, data.card_number || null, data.pin_code || null, data.active !== false ? 1 : 0, data.group_name || null, data.notes || null]);
+    return queryOne('SELECT * FROM people WHERE id = ?', [id]);
+  });
+
+  ipcMain.handle('people:update', (_e, { id, data }: any) => {
+    const existing = queryOne('SELECT * FROM people WHERE id = ?', [id]);
+    if (!existing) throw new Error('Person not found');
+    run(`UPDATE people SET name=?, registration=?, card_number=?, pin_code=?, active=?, group_name=?, notes=?, updated_at=datetime('now') WHERE id=?`,
+      [data.name ?? existing.name, data.registration ?? existing.registration, data.card_number ?? existing.card_number,
+       data.pin_code ?? existing.pin_code, data.active !== undefined ? (data.active ? 1 : 0) : existing.active,
+       data.group_name ?? existing.group_name, data.notes ?? existing.notes, id]);
+    return queryOne('SELECT * FROM people WHERE id = ?', [id]);
+  });
+
+  ipcMain.handle('people:delete', (_e, id: string) => {
+    run('DELETE FROM people WHERE id = ?', [id]);
+  });
+
+  ipcMain.handle('people:assign-devices', (_e, { personId, deviceIds }: any) => {
+    for (const deviceId of deviceIds) {
+      const existing = queryOne('SELECT id FROM person_devices WHERE person_id = ? AND device_id = ?', [personId, deviceId]);
+      if (!existing) {
+        run('INSERT INTO person_devices (id, person_id, device_id) VALUES (?,?,?)', [uuid(), personId, deviceId]);
+      }
+    }
+  });
+
+  ipcMain.handle('people:unassign-device', (_e, { personId, deviceId }: any) => {
+    run('DELETE FROM person_devices WHERE person_id = ? AND device_id = ?', [personId, deviceId]);
+  });
+
+  ipcMain.handle('people:sync-to-device', async (_e, { personId, deviceId }: any) => {
+    const person = queryOne('SELECT * FROM people WHERE id = ?', [personId]);
+    if (!person) throw new Error('Person not found');
+    const device = queryOne(`SELECT d.*, c.username, c.password as cred_password
+      FROM devices d LEFT JOIN credentials c ON d.credential_id = c.id WHERE d.id = ?`, [deviceId]);
+    if (!device) throw new Error('Device not found');
+    const adapter = adapterRegistry.get(device.manufacturer);
+    if (!adapter) throw new Error('No adapter');
+    // Control iD specific: add user to device
+    const conn: DeviceConnection = { ip: device.ip_address, port: device.port,
+      username: device.username || 'admin', password: device.cred_password ? decrypt(device.cred_password) : '' };
+    // Use getConfig/setConfig or direct API calls through adapter
+    // For Control iD, we use the legacy API
+    const controlId = adapter as any;
+    if (controlId.httpRequest) {
+      const proto = device.port === 443 ? 'https' : 'http';
+      const loginRes = await controlId.httpRequest(proto, device.ip_address, device.port, '/login.fcgi',
+        JSON.stringify({ login: conn.username, password: conn.password }), 10000);
+      if (loginRes?.session) {
+        await controlId.httpRequest(proto, device.ip_address, device.port, '/create_objects.fcgi',
+          JSON.stringify({ object: 'users', values: [{ id: parseInt(person.registration, 10), name: person.name, registration: person.registration }] }), 10000, loginRes.session);
+        if (person.card_number) {
+          await controlId.httpRequest(proto, device.ip_address, device.port, '/create_objects.fcgi',
+            JSON.stringify({ object: 'cards', values: [{ user_id: parseInt(person.registration, 10), value: parseInt(person.card_number, 10) }] }), 10000, loginRes.session);
+        }
+        await controlId.httpRequest(proto, device.ip_address, device.port, '/logout.fcgi', '{}', 5000, loginRes.session).catch(() => {});
+        run("UPDATE person_devices SET synced = 1, synced_at = datetime('now') WHERE person_id = ? AND device_id = ?", [personId, deviceId]);
+        return true;
+      }
+    }
+    throw new Error('Sync failed');
+  });
+
+  ipcMain.handle('people:batch-sync', async (_e, { personIds, deviceIds }: any) => {
+    return jobService.createJob('sync_people', `Sync ${personIds.length} people to ${deviceIds.length} devices`, deviceIds,
+      async (conn, device) => {
+        const adapter = adapterRegistry.get(device.manufacturer) as any;
+        if (!adapter?.httpRequest) throw new Error('No adapter');
+        const proto = device.port === 443 ? 'https' : 'http';
+        const loginRes = await adapter.httpRequest(proto, device.ip_address, device.port, '/login.fcgi',
+          JSON.stringify({ login: conn.username, password: conn.password }), 10000);
+        if (!loginRes?.session) throw new Error('Auth failed');
+        let synced = 0;
+        for (const personId of personIds) {
+          const person = queryOne('SELECT * FROM people WHERE id = ?', [personId]);
+          if (!person) continue;
+          await adapter.httpRequest(proto, device.ip_address, device.port, '/create_objects.fcgi',
+            JSON.stringify({ object: 'users', values: [{ id: parseInt(person.registration, 10), name: person.name, registration: person.registration }] }), 10000, loginRes.session);
+          if (person.card_number) {
+            await adapter.httpRequest(proto, device.ip_address, device.port, '/create_objects.fcgi',
+              JSON.stringify({ object: 'cards', values: [{ user_id: parseInt(person.registration, 10), value: parseInt(person.card_number, 10) }] }), 10000, loginRes.session);
+          }
+          run("UPDATE person_devices SET synced = 1, synced_at = datetime('now') WHERE person_id = ? AND device_id = ?", [personId, device.id]);
+          synced++;
+        }
+        await adapter.httpRequest(proto, device.ip_address, device.port, '/logout.fcgi', '{}', 5000, loginRes.session).catch(() => {});
+        return `Synced ${synced} people`;
+      }, getWindow());
+  });
+
   // ─── Jobs ───────────────────────────────────────────────────────
 
   ipcMain.handle('jobs:list', () => jobService.listJobs());

@@ -35,6 +35,17 @@ export const ipc = {
   updateCredential: (id: string, data: any) => window.api.invoke('credentials:update', { id, data }),
   deleteCredential: (id: string) => window.api.invoke('credentials:delete', id),
 
+  // People
+  listPeople: (opts?: any) => window.api.invoke('people:list', opts || {}),
+  getPerson: (id: string) => window.api.invoke('people:get', id),
+  createPerson: (data: any) => window.api.invoke('people:create', data),
+  updatePerson: (id: string, data: any) => window.api.invoke('people:update', { id, data }),
+  deletePerson: (id: string) => window.api.invoke('people:delete', id),
+  assignDevices: (personId: string, deviceIds: string[]) => window.api.invoke('people:assign-devices', { personId, deviceIds }),
+  unassignDevice: (personId: string, deviceId: string) => window.api.invoke('people:unassign-device', { personId, deviceId }),
+  syncPersonToDevice: (personId: string, deviceId: string) => window.api.invoke('people:sync-to-device', { personId, deviceId }),
+  batchSyncPeople: (personIds: string[], deviceIds: string[]) => window.api.invoke('people:batch-sync', { personIds, deviceIds }),
+
   // Jobs
   listJobs: () => window.api.invoke('jobs:list'),
   getJob: (id: string) => window.api.invoke('jobs:get', id),
