@@ -118,9 +118,13 @@ export function registerIpcHandlers(getWindow: () => BrowserWindow | null): void
       JSON.stringify({ login: device.username || 'admin', password: pw }), 10000);
     if (!loginRes?.session) throw new Error('Authentication failed');
 
-    const now = Math.floor(Date.now() / 1000);
+    // Send local time as Unix timestamp
+    // Device expects local time, not UTC. Adjust by timezone offset.
+    const now = new Date();
+    const localTimestamp = Math.floor(now.getTime() / 1000) - (now.getTimezoneOffset() * 60);
+    console.log('[SetTime] UTC:', Math.floor(now.getTime() / 1000), 'Local:', localTimestamp, 'Offset min:', now.getTimezoneOffset());
     const result = await adapter.httpRequest(proto, device.ip_address, device.port, '/set_system_time.fcgi',
-      JSON.stringify({ time: now }), 10000, loginRes.session);
+      JSON.stringify({ time: localTimestamp }), 10000, loginRes.session);
     console.log('[SetTime] Response:', JSON.stringify(result));
     await adapter.httpRequest(proto, device.ip_address, device.port, '/logout.fcgi', '{}', 5000, loginRes.session).catch(() => {});
 
