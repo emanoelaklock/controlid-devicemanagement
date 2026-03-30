@@ -434,12 +434,6 @@ export default function DevicesPage() {
             }} disabled={!detail.credential_id}
               className="w-full px-3 py-2 bg-slate-700 text-white text-xs rounded-lg hover:bg-slate-600 disabled:opacity-40 disabled:cursor-not-allowed">Sync Date/Time</button>
             <button onClick={async () => {
-              const name = await ipc.prompt('Save as Template', 'Enter template name:', `${detail.model || 'Device'} Config`);
-              if (!name) return;
-              try { await ipc.createTemplateFromDevice(detail.id, name); toast(`Template "${name}" created.`, 'success'); } catch (e: any) { toast(`Error: ${e.message}`, 'error'); }
-            }} disabled={!detail.credential_id}
-              className="w-full px-3 py-2 bg-slate-700 text-white text-xs rounded-lg hover:bg-slate-600 disabled:opacity-40 disabled:cursor-not-allowed">Save as Template</button>
-            <button onClick={async () => {
               if (!(await ipc.confirm('FACTORY RESET: This will erase all data on the device. Keep network settings?'))) return;
               const keepNet = await ipc.confirm('Preserve network configuration (IP, DHCP)?');
               try { await ipc.factoryReset(detail.id, keepNet); toast('Factory reset sent. Device is restarting...', 'warning'); await load(); } catch (e: any) { toast(`Error: ${e.message}`, 'error'); }

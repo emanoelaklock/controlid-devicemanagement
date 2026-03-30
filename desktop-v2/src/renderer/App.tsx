@@ -4,13 +4,12 @@ import { ToastContainer } from './components/Toast';
 import DashboardPage from './pages/DashboardPage';
 import DevicesPage from './pages/DevicesPage';
 import DiscoveryPage from './pages/DiscoveryPage';
-import TemplatesPage from './pages/TemplatesPage';
 import FirmwarePage from './pages/FirmwarePage';
 import JobsPage from './pages/JobsPage';
 import CredentialsPage from './pages/CredentialsPage';
 import AuditPage from './pages/AuditPage';
 
-export type Page = 'dashboard' | 'devices' | 'discovery' | 'templates' | 'firmware' | 'jobs' | 'credentials' | 'audit';
+export type Page = 'dashboard' | 'devices' | 'discovery' | 'firmware' | 'jobs' | 'credentials' | 'audit';
 
 export default function App() {
   const [page, setPage] = useState<Page>('dashboard');
@@ -20,7 +19,6 @@ export default function App() {
       case 'dashboard': return <DashboardPage />;
       case 'devices': return <DevicesPage />;
       case 'discovery': return <DiscoveryPage />;
-      case 'templates': return <TemplatesPage />;
       case 'firmware': return <FirmwarePage />;
       case 'jobs': return <JobsPage />;
       case 'credentials': return <CredentialsPage />;
