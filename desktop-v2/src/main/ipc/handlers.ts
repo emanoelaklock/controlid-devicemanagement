@@ -619,13 +619,85 @@ export function registerIpcHandlers(getWindow: () => BrowserWindow | null): void
       } catch { /* skip */ }
     }
 
-    // Device info for reference
+    // Device info + system_information (contains network, biometrics, etc)
     const sysInfo = await adapter.httpRequest(proto, device.ip_address, device.port, '/system_information.fcgi', '{}', 10000, s);
     config._device_info = {
       model: sysInfo?.device_two_names ?? sysInfo?.device_name,
       firmware: sysInfo?.version,
       serial: sysInfo?.serial,
     };
+    config.system_information = sysInfo;
+
+    // ── Try to read configuration modules by requesting specific known fields ──
+    // get_configuration.fcgi returns {} when called with empty body or {module: []}.
+    // Try requesting with specific field names from the API docs.
+    const configRequests: Record<string, any> = {
+      // Configurações Faciais
+      face_id: { face_id: { liveness_mode: '', limit_identification_to_display_region: '', min_detect_bounds_width: '', max_identified_duration: '' } },
+      face_module: { face_module: { light_threshold_led_activation: '' } },
+      led_white: { led_white: { brightness: '' } },
+      // Acesso => Mensagens / Tela
+      display: { display: { custom_auth_message: '', custom_deny_message: '', brightness: '', timeout: '', language: '' } },
+      // Sistema
+      general: { general: { local_identification: '', auto_reboot_hour: '', auto_reboot_minute: '', clear_expired_users: '', timezone: '', keep_user_image: '' } },
+      // Relés / GPIOs
+      relay: { relay: { relay1_enabled: '', relay1_timeout: '' } },
+      gpio: { gpio: { gpio1_mode: '', gpio1_enabled: '' } },
+      // SecBox
+      sec_box: { sec_box: {} },
+      // Online
+      online: { online: {} },
+      // Identificação
+      identifier: { identifier: {} },
+      // Monitor
+      monitor: { monitor: {} },
+    };
+
+    for (const [name, payload] of Object.entries(configRequests)) {
+      try {
+        const data = await adapter.httpRequest(proto, device.ip_address, device.port, '/get_configuration.fcgi',
+          JSON.stringify(payload), 10000, s);
+        console.log(`[Template] get_configuration ${name}:`, JSON.stringify(data));
+        // Check if any field has a non-empty value
+        const moduleData = data?.[name];
+        if (moduleData && typeof moduleData === 'object') {
+          const hasValues = Object.values(moduleData).some((v: any) => v !== '' && v !== null && v !== undefined);
+          if (hasValues) {
+            config[`_config_${name}`] = moduleData;
+          }
+        }
+      } catch { /* skip */ }
+    }
+
+    // Also try requesting the entire config as a single call with all modules
+    try {
+      const allModules: any = {};
+      for (const [name, payload] of Object.entries(configRequests)) {
+        Object.assign(allModules, payload);
+      }
+      const fullData = await adapter.httpRequest(proto, device.ip_address, device.port, '/get_configuration.fcgi',
+        JSON.stringify(allModules), 10000, s);
+      console.log('[Template] get_configuration (all modules):', JSON.stringify(fullData));
+      if (fullData && !fullData.error) {
+        for (const [k, v] of Object.entries(fullData)) {
+          if (v && typeof v === 'object' && Object.keys(v as any).length > 0) {
+            const hasValues = Object.values(v as any).some((val: any) => val !== '' && val !== null && val !== undefined);
+            if (hasValues && !config[`_config_${k}`]) {
+              config[`_config_${k}`] = v;
+            }
+          }
+        }
+      }
+    } catch { /* skip */ }
+
+    // Try reading logo/image if exists
+    try {
+      const logoData = await adapter.httpGet(proto, device.ip_address, device.port, '/get_user_image.fcgi?user_id=0', 10000, s);
+      if (logoData) {
+        console.log('[Template] Logo/image data found');
+        config._logo = logoData;
+      }
+    } catch { /* skip */ }
 
     await adapter.httpRequest(proto, device.ip_address, device.port, '/logout.fcgi', '{}', 5000, s).catch(() => {});
 
