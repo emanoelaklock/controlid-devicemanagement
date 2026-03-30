@@ -185,17 +185,37 @@ export function registerIpcHandlers(getWindow: () => BrowserWindow | null): void
     if (!loginRes?.session) throw new Error('Authentication failed');
 
     // Set timezone first (offset in seconds from UTC)
-    const tzOffsetSeconds = -(new Date().getTimezoneOffset() * 60); // JS gives minutes, inverted sign
-    console.log('[SetTime] Setting timezone offset:', tzOffsetSeconds, 'seconds (', tzOffsetSeconds / 3600, 'hours)');
+    const tzOffsetSeconds = -(new Date().getTimezoneOffset() * 60);
+    console.log('[SetTime] Setting timezone offset:', tzOffsetSeconds, 'seconds');
     await adapter.httpRequest(proto, device.ip_address, device.port, '/set_configuration.fcgi',
       JSON.stringify({ general: { timezone: tzOffsetSeconds } }), 10000, loginRes.session).catch(() => {});
 
-    // Set time as UTC Unix timestamp
-    const now = Math.floor(Date.now() / 1000);
-    console.log('[SetTime] Setting UTC timestamp:', now);
-    const result = await adapter.httpRequest(proto, device.ip_address, device.port, '/set_system_time.fcgi',
-      JSON.stringify({ time: now }), 10000, loginRes.session);
-    console.log('[SetTime] Response:', JSON.stringify(result));
+    // Set time - try both formats
+    const now = new Date();
+
+    // Format 1: Individual fields (iDFace Max firmware expects this)
+    const timeFields = {
+      day: now.getDate(),
+      month: now.getMonth() + 1,
+      year: now.getFullYear(),
+      hour: now.getHours(),
+      minute: now.getMinutes(),
+      second: now.getSeconds()
+    };
+    console.log('[SetTime] Sending time fields:', JSON.stringify(timeFields));
+    let result = await adapter.httpRequest(proto, device.ip_address, device.port, '/set_system_time.fcgi',
+      JSON.stringify(timeFields), 10000, loginRes.session);
+    console.log('[SetTime] Response (fields):', JSON.stringify(result));
+
+    // If that fails, try unix timestamp format
+    if (result?.error) {
+      const unixTime = Math.floor(now.getTime() / 1000);
+      console.log('[SetTime] Trying unix timestamp:', unixTime);
+      result = await adapter.httpRequest(proto, device.ip_address, device.port, '/set_system_time.fcgi',
+        JSON.stringify({ time: unixTime }), 10000, loginRes.session);
+      console.log('[SetTime] Response (unix):', JSON.stringify(result));
+    }
+
     await adapter.httpRequest(proto, device.ip_address, device.port, '/logout.fcgi', '{}', 5000, loginRes.session).catch(() => {});
 
     run(`INSERT INTO audit_logs (id, action, category, device_id, device_name, details, severity) VALUES (?,?,?,?,?,?,?)`,
@@ -563,77 +583,39 @@ export function registerIpcHandlers(getWindow: () => BrowserWindow | null): void
     if (!loginRes?.session) throw new Error('Authentication failed');
     const s = loginRes.session;
 
-    // Read all configuration sections from the iDFace Max
-    const readObj = async (object: string) => {
-      try {
-        const res = await adapter.httpRequest(proto, device.ip_address, device.port, '/load_objects.fcgi',
-          JSON.stringify({ object }), 10000, s);
-        return res;
-      } catch { return null; }
-    };
-
-    const readConfig = async () => {
-      try {
-        return await adapter.httpRequest(proto, device.ip_address, device.port, '/get_configuration.fcgi', '{}', 10000, s);
-      } catch { return null; }
-    };
-
-    // ── Read configuration modules via get_configuration.fcgi ──────
-    // Control iD API uses independent modules: face_id, face_module,
-    // led_white, display, general, relay, gpio, online, etc.
+    // ── Read device configuration via load_objects.fcgi ──────────
+    // Note: get_configuration.fcgi returns empty {} on iDFace Max.
+    // All config data comes from object tables via load_objects.fcgi.
     const config: Record<string, any> = {};
 
-    // All known configuration modules from Control iD API docs
-    const configModules = [
-      'face_id',       // Configurações Faciais: liveness_mode, min_detect_bounds_width, etc
-      'face_module',   // Configurações Faciais: light_threshold_led_activation
-      'led_white',     // Configurações Faciais: brightness (LED)
-      'display',       // Tela + Mensagens: custom_auth_message, brightness, timeout, language
-      'general',       // Sistema: local_identification, auto_reboot_hour, timezone, etc
-      'relay',         // Relés: relay1_enabled, relay1_timeout
-      'gpio',          // GPIOs: gpio1_mode, gpio1_enabled
-      'online',        // Online mode
-      'catra',         // Catraca
-      'sec_box',       // SecBox
-      'identifier',    // Identificação
-      'monitor',       // Monitoramento
+    // All object tables from Control iD API docs that contain configuration
+    const objectTables = [
+      // Structure & Access (confirmed working)
+      'access_rules',          // Regras de acesso
+      'time_zones',            // Horários
+      'time_spans',            // Intervalos de horário (dias/horas)
+      'identification_rules',  // Regras de identificação
+      'groups',                // Grupos de acesso
+      'portals',               // Portais (áreas)
+      'portal_access_rules',   // Portal ↔ Regra de acesso
+      'group_access_rules',    // Grupo ↔ Regra de acesso
+      'areas',                 // Áreas
+      'actions',               // Scripts de ação
+      'portal_actions',        // Portal ↔ Ação
+      'script_instances',      // Instâncias de script
+      // Hardware
+      'alarm_zones',           // Zonas de alarme
+      'sec_boxs',              // MAE / Security Box
+      'scheduled_unlocks',     // Liberações agendadas
+      // Holidays
+      'holidays',              // Feriados
     ];
-
-    // Read each module by requesting it specifically
-    for (const mod of configModules) {
-      try {
-        // Method 1: Request specific module
-        const data = await adapter.httpRequest(proto, device.ip_address, device.port, '/get_configuration.fcgi',
-          JSON.stringify({ [mod]: [] }), 10000, s);
-        console.log(`[Template] get_configuration ${mod}:`, JSON.stringify(data));
-        if (data && !data.error && Object.keys(data).length > 0) {
-          config[mod] = data[mod] ?? data;
-        }
-      } catch { /* skip */ }
-    }
-
-    // Also try full config dump
-    try {
-      const full = await adapter.httpRequest(proto, device.ip_address, device.port, '/get_configuration.fcgi', '{}', 10000, s);
-      console.log('[Template] Full get_configuration:', JSON.stringify(full));
-      if (full && !full.error) {
-        for (const [k, v] of Object.entries(full)) {
-          if (!config[k] && v && typeof v === 'object') config[k] = v;
-        }
-      }
-    } catch { /* skip */ }
-
-    // Read object tables (rules, zones, etc)
-    const objectTables = ['access_rules', 'time_zones', 'identification_rules',
-      'time_zone_time_spans', 'groups', 'portals', 'portal_access_rules',
-      'actions', 'portal_actions', 'contingency_access_rules', 'areas',
-      'script_instances'];
 
     for (const obj of objectTables) {
       try {
         const data = await adapter.httpRequest(proto, device.ip_address, device.port, '/load_objects.fcgi',
           JSON.stringify({ object: obj }), 10000, s);
-        if (data && !data.error) config[obj] = data;
+        if (data && !data.error && Object.keys(data).length > 0) config[obj] = data;
       } catch { /* skip */ }
     }
 
@@ -699,28 +681,18 @@ export function registerIpcHandlers(getWindow: () => BrowserWindow | null): void
 
         let applied = 0;
 
-        // Apply configuration modules via set_configuration.fcgi
-        // Each module is sent as { module_name: { field: value, ... } }
-        const configModules = ['face_id', 'face_module', 'led_white', 'display', 'general',
-          'relay', 'gpio', 'online', 'catra', 'sec_box', 'identifier', 'monitor'];
-
-        for (const mod of configModules) {
-          if (config[mod] && typeof config[mod] === 'object' && Object.keys(config[mod]).length > 0) {
-            console.log(`[ApplyTemplate] Setting ${mod}:`, JSON.stringify(config[mod]));
-            await adapter.httpRequest(proto, device.ip_address, device.port, '/set_configuration.fcgi',
-              JSON.stringify({ [mod]: config[mod] }), 10000, s).catch(() => {});
-            applied++;
-          }
-        }
-
         // Apply object tables via create_objects.fcgi
-        const objectTables = ['access_rules', 'time_zones', 'identification_rules',
-          'time_zone_time_spans', 'groups', 'portals', 'portal_access_rules',
-          'actions', 'portal_actions'];
+        // Note: get/set_configuration.fcgi returns empty on iDFace Max
+        // All config is stored in object tables
+        const objectTables = ['access_rules', 'time_zones', 'time_spans',
+          'identification_rules', 'groups', 'portals', 'portal_access_rules',
+          'group_access_rules', 'areas', 'actions', 'portal_actions',
+          'alarm_zones', 'sec_boxs', 'scheduled_unlocks', 'holidays'];
 
         for (const objType of objectTables) {
           const objData = config[objType]?.[objType]; // { access_rules: { access_rules: [...] } }
-          if (Array.isArray(objData)) {
+          if (Array.isArray(objData) && objData.length > 0) {
+            console.log(`[ApplyTemplate] Creating ${objData.length} ${objType}`);
             for (const item of objData) {
               await adapter.httpRequest(proto, device.ip_address, device.port, '/create_objects.fcgi',
                 JSON.stringify({ object: objType, values: [item] }), 10000, s).catch(() => {});
