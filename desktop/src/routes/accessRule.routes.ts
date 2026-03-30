@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { z } from 'zod';
-import { prisma } from '../database';
+import crypto from 'crypto';
+import { query, queryOne, run } from '../utils/db-helpers';
 import { asyncHandler } from '../utils/asyncHandler';
 import { authenticate, authorize } from '../middleware/auth';
 import { AppError } from '../middleware/errorHandler';
@@ -8,7 +9,7 @@ import { AppError } from '../middleware/errorHandler';
 const router = Router();
 router.use(authenticate);
 
-const accessRuleSchema = z.object({
+const ruleSchema = z.object({
   name: z.string().min(1).max(100), deviceId: z.string().uuid(), groupId: z.string().uuid().optional(),
   timeZone: z.string().default('*'), daysOfWeek: z.string().default('1,2,3,4,5,6,7'),
   startTime: z.string().regex(/^\d{2}:\d{2}$/).default('00:00'), endTime: z.string().regex(/^\d{2}:\d{2}$/).default('23:59'),
@@ -17,33 +18,39 @@ const accessRuleSchema = z.object({
 
 router.get('/', asyncHandler(async (req, res) => {
   const { deviceId } = req.query;
-  const where = deviceId ? { deviceId: deviceId as string } : {};
-  const rules = await prisma.accessRule.findMany({
-    where, include: { device: { select: { id: true, name: true } }, group: true }, orderBy: { name: 'asc' },
-  });
-  res.json(rules);
+  let sql = `SELECT ar.*, d.name as device_name, g.name as group_name FROM access_rules ar LEFT JOIN devices d ON ar.device_id = d.id LEFT JOIN person_groups g ON ar.group_id = g.id`;
+  const params: any[] = [];
+  if (deviceId) { sql += ` WHERE ar.device_id = ?`; params.push(deviceId); }
+  sql += ` ORDER BY ar.name ASC`;
+  res.json(query(sql, params).map((r: any) => ({ ...r, active: !!r.active, device: { id: r.device_id, name: r.device_name }, group: r.group_name ? { name: r.group_name } : null })));
 }));
 
 router.get('/:id', asyncHandler(async (req, res) => {
-  const rule = await prisma.accessRule.findUnique({ where: { id: req.params.id }, include: { device: true, group: true } });
+  const rule = queryOne('SELECT * FROM access_rules WHERE id = ?', [req.params.id]);
   if (!rule) throw new AppError(404, 'Access rule not found');
-  res.json(rule);
+  res.json({ ...rule, active: !!rule.active });
 }));
 
 router.post('/', authorize('ADMIN', 'OPERATOR'), asyncHandler(async (req, res) => {
-  const data = accessRuleSchema.parse(req.body);
-  const rule = await prisma.accessRule.create({ data, include: { device: { select: { id: true, name: true } }, group: true } });
-  res.status(201).json(rule);
+  const data = ruleSchema.parse(req.body);
+  const id = crypto.randomUUID();
+  run(`INSERT INTO access_rules (id,name,device_id,group_id,time_zone,days_of_week,start_time,end_time,active) VALUES (?,?,?,?,?,?,?,?,?)`,
+    [id, data.name, data.deviceId, data.groupId || null, data.timeZone, data.daysOfWeek, data.startTime, data.endTime, data.active ? 1 : 0]);
+  res.status(201).json(queryOne('SELECT * FROM access_rules WHERE id = ?', [id]));
 }));
 
 router.put('/:id', authorize('ADMIN', 'OPERATOR'), asyncHandler(async (req, res) => {
-  const data = accessRuleSchema.partial().parse(req.body);
-  const rule = await prisma.accessRule.update({ where: { id: req.params.id }, data, include: { device: { select: { id: true, name: true } }, group: true } });
-  res.json(rule);
+  const data = ruleSchema.partial().parse(req.body);
+  const e = queryOne('SELECT * FROM access_rules WHERE id = ?', [req.params.id]);
+  if (!e) throw new AppError(404, 'Access rule not found');
+  run(`UPDATE access_rules SET name=?,device_id=?,group_id=?,time_zone=?,days_of_week=?,start_time=?,end_time=?,active=?,updated_at=datetime('now') WHERE id=?`,
+    [data.name??e.name, data.deviceId??e.device_id, data.groupId??e.group_id, data.timeZone??e.time_zone, data.daysOfWeek??e.days_of_week,
+     data.startTime??e.start_time, data.endTime??e.end_time, data.active!==undefined?(data.active?1:0):e.active, req.params.id]);
+  res.json(queryOne('SELECT * FROM access_rules WHERE id = ?', [req.params.id]));
 }));
 
 router.delete('/:id', authorize('ADMIN'), asyncHandler(async (req, res) => {
-  await prisma.accessRule.delete({ where: { id: req.params.id } });
+  run('DELETE FROM access_rules WHERE id = ?', [req.params.id]);
   res.json({ message: 'Access rule deleted' });
 }));
 

@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { z } from 'zod';
-import { prisma } from '../database';
+import crypto from 'crypto';
+import { query, queryOne, run } from '../utils/db-helpers';
 import { asyncHandler } from '../utils/asyncHandler';
 import { authenticate, authorize } from '../middleware/auth';
 import { AppError } from '../middleware/errorHandler';
@@ -16,51 +17,53 @@ const personSchema = z.object({
 
 router.get('/', asyncHandler(async (req, res) => {
   const { search, groupId, active } = req.query;
-  const where: Record<string, unknown> = {};
-  if (search) where.OR = [{ name: { contains: search as string } }, { registration: { contains: search as string } }];
-  if (groupId) where.groupId = groupId;
-  if (active !== undefined) where.active = active === 'true';
-  const people = await prisma.person.findMany({
-    where, include: { group: true, devices: { include: { device: { select: { id: true, name: true } } } } }, orderBy: { name: 'asc' },
-  });
-  res.json(people);
+  let sql = `SELECT p.*, g.name as group_name FROM people p LEFT JOIN person_groups g ON p.group_id = g.id WHERE 1=1`;
+  const params: any[] = [];
+  if (search) { sql += ` AND (p.name LIKE ? OR p.registration LIKE ?)`; params.push(`%${search}%`, `%${search}%`); }
+  if (groupId) { sql += ` AND p.group_id = ?`; params.push(groupId); }
+  if (active !== undefined) { sql += ` AND p.active = ?`; params.push(active === 'true' ? 1 : 0); }
+  sql += ` ORDER BY p.name ASC`;
+  const people = query(sql, params);
+  res.json(people.map((p: any) => {
+    const devices = query(`SELECT d.id, d.name FROM person_devices pd JOIN devices d ON pd.device_id = d.id WHERE pd.person_id = ?`, [p.id]);
+    return { ...p, active: !!p.active, group: p.group_name ? { name: p.group_name } : null, devices: devices.map((d: any) => ({ device: d })) };
+  }));
 }));
 
 router.get('/:id', asyncHandler(async (req, res) => {
-  const person = await prisma.person.findUnique({
-    where: { id: req.params.id },
-    include: { group: true, devices: { include: { device: { select: { id: true, name: true, status: true } } } } },
-  });
+  const person = queryOne('SELECT p.*, g.name as group_name FROM people p LEFT JOIN person_groups g ON p.group_id = g.id WHERE p.id = ?', [req.params.id]);
   if (!person) throw new AppError(404, 'Person not found');
-  res.json(person);
+  const devices = query(`SELECT d.id, d.name, d.status FROM person_devices pd JOIN devices d ON pd.device_id = d.id WHERE pd.person_id = ?`, [req.params.id]);
+  res.json({ ...person, active: !!person.active, group: person.group_name ? { name: person.group_name } : null, devices: devices.map((d: any) => ({ device: d })) });
 }));
 
 router.post('/', authorize('ADMIN', 'OPERATOR'), asyncHandler(async (req, res) => {
   const data = personSchema.parse(req.body);
-  const person = await prisma.person.create({ data, include: { group: true } });
-  res.status(201).json(person);
+  const id = crypto.randomUUID();
+  run(`INSERT INTO people (id, name, registration, card_number, pin_code, active, group_id) VALUES (?,?,?,?,?,?,?)`,
+    [id, data.name, data.registration, data.cardNumber || null, data.pinCode || null, data.active ? 1 : 0, data.groupId || null]);
+  res.status(201).json(queryOne('SELECT * FROM people WHERE id = ?', [id]));
 }));
 
 router.put('/:id', authorize('ADMIN', 'OPERATOR'), asyncHandler(async (req, res) => {
   const data = personSchema.partial().parse(req.body);
-  const person = await prisma.person.update({ where: { id: req.params.id }, data, include: { group: true } });
-  res.json(person);
+  const existing = queryOne('SELECT * FROM people WHERE id = ?', [req.params.id]);
+  if (!existing) throw new AppError(404, 'Person not found');
+  run(`UPDATE people SET name=?, registration=?, card_number=?, pin_code=?, active=?, group_id=?, updated_at=datetime('now') WHERE id=?`,
+    [data.name ?? existing.name, data.registration ?? existing.registration, data.cardNumber ?? existing.card_number,
+     data.pinCode ?? existing.pin_code, data.active !== undefined ? (data.active ? 1 : 0) : existing.active, data.groupId ?? existing.group_id, req.params.id]);
+  res.json(queryOne('SELECT * FROM people WHERE id = ?', [req.params.id]));
 }));
 
 router.delete('/:id', authorize('ADMIN'), asyncHandler(async (req, res) => {
-  await prisma.person.delete({ where: { id: req.params.id } });
+  run('DELETE FROM people WHERE id = ?', [req.params.id]);
   res.json({ message: 'Person deleted' });
 }));
 
 router.post('/:id/assign-devices', authorize('ADMIN', 'OPERATOR'), asyncHandler(async (req, res) => {
   const { deviceIds } = z.object({ deviceIds: z.array(z.string().uuid()) }).parse(req.body);
-  const created = await Promise.all(deviceIds.map((deviceId) =>
-    prisma.personDevice.upsert({
-      where: { personId_deviceId: { personId: req.params.id, deviceId } },
-      update: { synced: false }, create: { personId: req.params.id, deviceId },
-    })
-  ));
-  res.json({ assigned: created.length });
+  for (const deviceId of deviceIds) { run(`INSERT OR REPLACE INTO person_devices (id, person_id, device_id, synced) VALUES (?,?,?,0)`, [crypto.randomUUID(), req.params.id, deviceId]); }
+  res.json({ assigned: deviceIds.length });
 }));
 
 export { router as personRouter };

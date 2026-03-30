@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { z } from 'zod';
-import { prisma } from '../database';
+import crypto from 'crypto';
+import { query, queryOne, run } from '../utils/db-helpers';
 import { asyncHandler } from '../utils/asyncHandler';
 import { authenticate, authorize } from '../middleware/auth';
 import { AppError } from '../middleware/errorHandler';
@@ -8,35 +9,36 @@ import { AppError } from '../middleware/errorHandler';
 const router = Router();
 router.use(authenticate);
 
-const locationSchema = z.object({ name: z.string().min(1).max(100), address: z.string().max(300).optional() });
-
 router.get('/', asyncHandler(async (_req, res) => {
-  const locations = await prisma.location.findMany({
-    include: { devices: { select: { id: true, name: true, status: true } } }, orderBy: { name: 'asc' },
-  });
-  res.json(locations);
+  const locations = query('SELECT * FROM locations ORDER BY name ASC');
+  res.json(locations.map((loc: any) => ({
+    ...loc, devices: query('SELECT id, name, status FROM devices WHERE location_id = ?', [loc.id]),
+  })));
 }));
 
 router.get('/:id', asyncHandler(async (req, res) => {
-  const location = await prisma.location.findUnique({ where: { id: req.params.id }, include: { devices: true } });
+  const location = queryOne('SELECT * FROM locations WHERE id = ?', [req.params.id]);
   if (!location) throw new AppError(404, 'Location not found');
-  res.json(location);
+  res.json({ ...location, devices: query('SELECT * FROM devices WHERE location_id = ?', [req.params.id]) });
 }));
 
 router.post('/', authorize('ADMIN'), asyncHandler(async (req, res) => {
-  const data = locationSchema.parse(req.body);
-  const location = await prisma.location.create({ data });
-  res.status(201).json(location);
+  const { name, address } = z.object({ name: z.string().min(1).max(100), address: z.string().max(300).optional() }).parse(req.body);
+  const id = crypto.randomUUID();
+  run('INSERT INTO locations (id, name, address) VALUES (?,?,?)', [id, name, address || null]);
+  res.status(201).json(queryOne('SELECT * FROM locations WHERE id = ?', [id]));
 }));
 
 router.put('/:id', authorize('ADMIN'), asyncHandler(async (req, res) => {
-  const data = locationSchema.partial().parse(req.body);
-  const location = await prisma.location.update({ where: { id: req.params.id }, data });
-  res.json(location);
+  const data = z.object({ name: z.string().min(1).max(100).optional(), address: z.string().max(300).optional() }).parse(req.body);
+  const existing = queryOne('SELECT * FROM locations WHERE id = ?', [req.params.id]);
+  if (!existing) throw new AppError(404, 'Location not found');
+  run("UPDATE locations SET name=?, address=?, updated_at=datetime('now') WHERE id=?", [data.name ?? existing.name, data.address ?? existing.address, req.params.id]);
+  res.json(queryOne('SELECT * FROM locations WHERE id = ?', [req.params.id]));
 }));
 
 router.delete('/:id', authorize('ADMIN'), asyncHandler(async (req, res) => {
-  await prisma.location.delete({ where: { id: req.params.id } });
+  run('DELETE FROM locations WHERE id = ?', [req.params.id]);
   res.json({ message: 'Location deleted' });
 }));
 

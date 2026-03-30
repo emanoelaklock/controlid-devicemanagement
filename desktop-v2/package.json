@@ -1,0 +1,68 @@
+{
+  "name": "controlid-device-manager",
+  "version": "2.0.0",
+  "description": "Control iD Device Manager - Enterprise Desktop Application",
+  "main": "dist/main/index.js",
+  "author": "Control iD",
+  "license": "MIT",
+  "scripts": {
+    "dev": "concurrently \"npm run dev:main\" \"npm run dev:renderer\"",
+    "dev:main": "npx tsc -p tsconfig.main.json && npm run build:renderer && electron .",
+    "dev:renderer": "vite dev",
+    "build:main": "npx tsc -p tsconfig.main.json",
+    "build:renderer": "vite build",
+    "build": "npm run build:main && npm run build:renderer",
+    "clean": "node -e \"const f=require('fs');['dist','release','out'].forEach(d=>{try{f.rmSync(d,{recursive:true,force:true})}catch{}})\"",
+    "dist": "npm run clean && npm run build && electron-builder --win",
+    "dist:linux": "npm run clean && npm run build && electron-builder --linux"
+  },
+  "dependencies": {
+    "sql.js": "^1.11.0",
+    "bcryptjs": "^2.4.3",
+    "electron-store": "^10.0.0",
+    "uuid": "^10.0.0"
+  },
+  "devDependencies": {
+    "@types/bcryptjs": "^2.4.6",
+    "@types/node": "^22.7.0",
+    "@types/react": "^18.3.8",
+    "@types/react-dom": "^18.3.0",
+    "@types/uuid": "^10.0.0",
+    "@vitejs/plugin-react": "^4.3.1",
+    "autoprefixer": "^10.4.20",
+    "concurrently": "^9.0.1",
+    "electron": "^32.1.0",
+    "electron-builder": "^25.0.5",
+    "postcss": "^8.4.47",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "react-hot-toast": "^2.4.1",
+    "tailwindcss": "^3.4.12",
+    "typescript": "^5.6.2",
+    "vite": "^5.4.7"
+  },
+  "build": {
+    "appId": "com.controlid.devicemanager",
+    "productName": "Control iD Device Manager",
+    "directories": { "output": "release" },
+    "asar": false,
+    "files": [
+      "dist/**/*",
+      "node_modules/**/*"
+    ],
+    "extraResources": [
+      { "from": "node_modules/sql.js/dist/sql-wasm.wasm", "to": "sql-wasm.wasm" }
+    ],
+    "win": {
+      "target": [{ "target": "nsis", "arch": ["x64"] }],
+      "icon": "assets/icon.ico"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Control iD Device Manager"
+    }
+  }
+}

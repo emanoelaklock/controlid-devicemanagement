@@ -1,24 +1,22 @@
 {
   "name": "controlid-device-manager",
-  "version": "1.0.0",
+  "version": "1.2.0",
   "description": "Control iD Device Manager - Desktop Application",
   "main": "dist/main.js",
   "author": "Control iD",
   "license": "MIT",
   "scripts": {
-    "build:backend": "tsc",
+    "build:backend": "npx tsc",
     "build:frontend": "cd ../frontend && npm install && npm run build",
-    "prisma:generate": "prisma generate",
-    "prisma:migrate": "prisma migrate deploy",
-    "prebuild": "npm run prisma:generate && npm run build:backend && npm run build:frontend",
     "start": "electron .",
-    "dev": "tsc && electron .",
-    "dist": "npm run prebuild && electron-builder --win",
-    "dist:linux": "npm run prebuild && electron-builder --linux",
-    "dist:mac": "npm run prebuild && electron-builder --mac"
+    "dev": "npm run build:backend && electron .",
+    "clean": "node -e \"const fs=require('fs');['release','dist'].forEach(d=>{try{fs.rmSync(d,{recursive:true,force:true})}catch{}})\"",
+    "dist": "npm run clean && npm run build:backend && npm run build:frontend && electron-builder --win",
+    "dist:linux": "npm run clean && npm run build:backend && npm run build:frontend && electron-builder --linux",
+    "dist:mac": "npm run clean && npm run build:backend && npm run build:frontend && electron-builder --mac"
   },
   "dependencies": {
-    "@prisma/client": "^5.20.0",
+    "sql.js": "^1.11.0",
     "bcryptjs": "^2.4.3",
     "cors": "^2.8.5",
     "dotenv": "^16.4.5",
@@ -39,7 +37,6 @@
     "@types/node-cron": "^3.0.11",
     "electron": "^32.1.0",
     "electron-builder": "^25.0.5",
-    "prisma": "^5.20.0",
     "typescript": "^5.6.2"
   },
   "build": {
@@ -48,30 +45,23 @@
     "directories": {
       "output": "release"
     },
+    "asar": false,
     "files": [
       "dist/**/*",
-      "prisma/**/*",
-      "node_modules/**/*",
-      "frontend-dist/**/*"
+      "node_modules/**/*"
     ],
     "extraResources": [
       {
-        "from": "prisma",
-        "to": "prisma",
-        "filter": ["schema.prisma", "migrations/**/*"]
-      },
-      {
         "from": "../frontend/dist",
         "to": "frontend-dist"
+      },
+      {
+        "from": "node_modules/sql.js/dist/sql-wasm.wasm",
+        "to": "sql-wasm.wasm"
       }
     ],
     "win": {
-      "target": [
-        {
-          "target": "nsis",
-          "arch": ["x64"]
-        }
-      ],
+      "target": [{ "target": "nsis", "arch": ["x64"] }],
       "icon": "assets/icon.ico"
     },
     "nsis": {
@@ -79,16 +69,9 @@
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
-      "installerHeaderIcon": "assets/icon.ico",
       "shortcutName": "Control iD Device Manager"
     },
-    "linux": {
-      "target": ["AppImage"],
-      "icon": "assets/icon.png"
-    },
-    "mac": {
-      "target": ["dmg"],
-      "icon": "assets/icon.icns"
-    }
+    "linux": { "target": ["AppImage"], "icon": "assets/icon.png" },
+    "mac": { "target": ["dmg"], "icon": "assets/icon.icns" }
   }
 }
