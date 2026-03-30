@@ -89,7 +89,7 @@ function createSchema(): void {
       serial_number TEXT NOT NULL DEFAULT '',
       mac_address TEXT,
       ip_address TEXT NOT NULL,
-      port INTEGER NOT NULL DEFAULT 443,
+      port INTEGER NOT NULL DEFAULT 80,
       hostname TEXT,
       firmware_version TEXT,
       status TEXT NOT NULL DEFAULT 'unknown',

@@ -65,13 +65,9 @@ export class ControlIdAdapter implements DeviceAdapter {
       const loginRes = await this.httpRequest(proto, ip, port, '/login.fcgi', JSON.stringify({ login: username, password }), 10000);
       if (loginRes?.session) {
         const info = await this.httpRequest(proto, ip, port, '/system_information.fcgi', '{}', 10000, loginRes.session);
-        console.log('[ControlID] system_information response:', JSON.stringify(info, null, 2));
 
         // Also try to get network config for MAC and DHCP
         const netConfig = await this.httpRequest(proto, ip, port, '/get_configuration.fcgi', '{}', 10000, loginRes.session).catch(() => null);
-        if (netConfig) {
-          console.log('[ControlID] get_configuration response:', JSON.stringify(netConfig, null, 2));
-        }
 
         await this.httpRequest(proto, ip, port, '/logout.fcgi', '{}', 5000, loginRes.session).catch(() => {});
         return this.buildDeviceInfo(info, proto, netConfig);
@@ -215,9 +211,6 @@ export class ControlIdAdapter implements DeviceAdapter {
 
     const net = info.network ?? {};
 
-    console.log('[ControlID] buildDeviceInfo - info.network:', JSON.stringify(net));
-    console.log('[ControlID] buildDeviceInfo - net.mac:', net.mac, 'device_two_names:', info.device_two_names, 'net.dhcp_enabled:', net.dhcp_enabled);
-
     const result = {
       manufacturer: 'controlid',
       model: info.device_two_names ?? info.device_name ?? info.model ?? info.product ?? 'Unknown',
@@ -229,7 +222,6 @@ export class ControlIdAdapter implements DeviceAdapter {
       dhcpEnabled: !!(net.dhcp_enabled ?? info.dhcp_enabled ?? false),
     };
 
-    console.log('[ControlID] buildDeviceInfo result:', JSON.stringify(result));
     return result;
   }
 

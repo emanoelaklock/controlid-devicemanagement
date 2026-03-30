@@ -186,7 +186,6 @@ export function registerIpcHandlers(getWindow: () => BrowserWindow | null): void
 
     // Set timezone first (offset in seconds from UTC)
     const tzOffsetSeconds = -(new Date().getTimezoneOffset() * 60);
-    console.log('[SetTime] Setting timezone offset:', tzOffsetSeconds, 'seconds');
     await adapter.httpRequest(proto, device.ip_address, device.port, '/set_configuration.fcgi',
       JSON.stringify({ general: { timezone: tzOffsetSeconds } }), 10000, loginRes.session).catch(() => {});
 
@@ -202,18 +201,14 @@ export function registerIpcHandlers(getWindow: () => BrowserWindow | null): void
       minute: now.getMinutes(),
       second: now.getSeconds()
     };
-    console.log('[SetTime] Sending time fields:', JSON.stringify(timeFields));
     let result = await adapter.httpRequest(proto, device.ip_address, device.port, '/set_system_time.fcgi',
       JSON.stringify(timeFields), 10000, loginRes.session);
-    console.log('[SetTime] Response (fields):', JSON.stringify(result));
 
     // If that fails, try unix timestamp format
     if (result?.error) {
       const unixTime = Math.floor(now.getTime() / 1000);
-      console.log('[SetTime] Trying unix timestamp:', unixTime);
       result = await adapter.httpRequest(proto, device.ip_address, device.port, '/set_system_time.fcgi',
         JSON.stringify({ time: unixTime }), 10000, loginRes.session);
-      console.log('[SetTime] Response (unix):', JSON.stringify(result));
     }
 
     await adapter.httpRequest(proto, device.ip_address, device.port, '/logout.fcgi', '{}', 5000, loginRes.session).catch(() => {});
@@ -657,7 +652,6 @@ export function registerIpcHandlers(getWindow: () => BrowserWindow | null): void
       try {
         const data = await adapter.httpRequest(proto, device.ip_address, device.port, '/get_configuration.fcgi',
           JSON.stringify(payload), 10000, s);
-        console.log(`[Template] get_configuration ${name}:`, JSON.stringify(data));
         // Check if any field has a non-empty value
         const moduleData = data?.[name];
         if (moduleData && typeof moduleData === 'object') {
@@ -677,7 +671,6 @@ export function registerIpcHandlers(getWindow: () => BrowserWindow | null): void
       }
       const fullData = await adapter.httpRequest(proto, device.ip_address, device.port, '/get_configuration.fcgi',
         JSON.stringify(allModules), 10000, s);
-      console.log('[Template] get_configuration (all modules):', JSON.stringify(fullData));
       if (fullData && !fullData.error) {
         for (const [k, v] of Object.entries(fullData)) {
           if (v && typeof v === 'object' && Object.keys(v as any).length > 0) {
@@ -694,7 +687,6 @@ export function registerIpcHandlers(getWindow: () => BrowserWindow | null): void
     try {
       const logoData = await adapter.httpGet(proto, device.ip_address, device.port, '/get_user_image.fcgi?user_id=0', 10000, s);
       if (logoData) {
-        console.log('[Template] Logo/image data found');
         config._logo = logoData;
       }
     } catch { /* skip */ }
@@ -709,8 +701,6 @@ export function registerIpcHandlers(getWindow: () => BrowserWindow | null): void
       }
     }
 
-    console.log('[Template] Valid config sections:', Object.keys(cleanConfig));
-    console.log('[Template] Full config:', JSON.stringify(cleanConfig, null, 2));
 
     const id = uuid();
     run(`INSERT INTO config_templates (id, name, manufacturer, model, config, created_at, updated_at) VALUES (?,?,?,?,?,?,?)`,
@@ -764,7 +754,6 @@ export function registerIpcHandlers(getWindow: () => BrowserWindow | null): void
         for (const objType of objectTables) {
           const objData = config[objType]?.[objType]; // { access_rules: { access_rules: [...] } }
           if (Array.isArray(objData) && objData.length > 0) {
-            console.log(`[ApplyTemplate] Creating ${objData.length} ${objType}`);
             for (const item of objData) {
               await adapter.httpRequest(proto, device.ip_address, device.port, '/create_objects.fcgi',
                 JSON.stringify({ object: objType, values: [item] }), 10000, s).catch(() => {});
@@ -841,12 +830,10 @@ export function registerIpcHandlers(getWindow: () => BrowserWindow | null): void
     // First read current network config to understand the API structure
     const currentConfig = await adapter.httpRequest(proto, device.ip_address, device.port, '/get_configuration.fcgi',
       '{}', 10000, loginRes.session);
-    console.log('[Network] Current get_configuration response:', JSON.stringify(currentConfig, null, 2));
 
     // Also read system_information to see network fields
     const sysInfo = await adapter.httpRequest(proto, device.ip_address, device.port, '/system_information.fcgi',
       '{}', 10000, loginRes.session);
-    console.log('[Network] Current system_information.network:', JSON.stringify(sysInfo?.network, null, 2));
 
     // Build network config - try the exact structure from system_information
     const netConfig: any = {};
@@ -861,24 +848,18 @@ export function registerIpcHandlers(getWindow: () => BrowserWindow | null): void
     }
 
     // Try Method 1: set_configuration with { network: { ... } }
-    console.log('[Network] Method 1 - set_configuration { network }:', JSON.stringify({ network: netConfig }));
     const result1 = await adapter.httpRequest(proto, device.ip_address, device.port, '/set_configuration.fcgi',
       JSON.stringify({ network: netConfig }), 10000, loginRes.session);
-    console.log('[Network] Method 1 response:', JSON.stringify(result1));
 
     // Try Method 2: set_configuration with flat fields (some firmwares use this)
-    console.log('[Network] Method 2 - set_configuration flat:', JSON.stringify(netConfig));
     const result2 = await adapter.httpRequest(proto, device.ip_address, device.port, '/set_configuration.fcgi',
       JSON.stringify(netConfig), 10000, loginRes.session);
-    console.log('[Network] Method 2 response:', JSON.stringify(result2));
 
     // Verify: read config again to check if it changed
     const verifyInfo = await adapter.httpRequest(proto, device.ip_address, device.port, '/system_information.fcgi',
       '{}', 10000, loginRes.session);
-    console.log('[Network] After set - network config:', JSON.stringify(verifyInfo?.network, null, 2));
 
     // Reboot device to apply network changes
-    console.log('[Network] Rebooting device to apply changes...');
     await adapter.httpRequest(proto, device.ip_address, device.port, '/reboot.fcgi', '{}', 10000, loginRes.session).catch(() => {});
 
     // Update local DB

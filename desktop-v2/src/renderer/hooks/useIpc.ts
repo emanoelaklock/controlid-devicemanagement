@@ -38,6 +38,7 @@ export const ipc = {
   createCredential: (data: any) => window.api.invoke('credentials:create', data),
   updateCredential: (id: string, data: any) => window.api.invoke('credentials:update', { id, data }),
   deleteCredential: (id: string) => window.api.invoke('credentials:delete', id),
+  setDefaultCredential: (id: string) => window.api.invoke('credentials:set-default', id),
 
   // People
   listPeople: (opts?: any) => window.api.invoke('people:list', opts || {}),

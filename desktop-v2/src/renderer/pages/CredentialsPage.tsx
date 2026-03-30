@@ -47,7 +47,7 @@ export default function CredentialsPage() {
 
   const handleSetDefault = async (id: string) => {
     try {
-      await ipc.invoke('credentials:set-default', id);
+      await ipc.setDefaultCredential(id);
       await load();
     } catch (err: any) {
       toast(`Error: ${err.message || err}`);
