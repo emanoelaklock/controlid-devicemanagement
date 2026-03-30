@@ -578,64 +578,72 @@ export function registerIpcHandlers(getWindow: () => BrowserWindow | null): void
       } catch { return null; }
     };
 
-    // Collect configuration sections
+    // ── Read configuration modules via get_configuration.fcgi ──────
+    // Control iD API uses independent modules: face_id, face_module,
+    // led_white, display, general, relay, gpio, online, etc.
     const config: Record<string, any> = {};
 
-    // Configurações Faciais => Configurações Gerais
-    const sysInfo = await adapter.httpRequest(proto, device.ip_address, device.port, '/system_information.fcgi', '{}', 10000, s);
-    config.system_information = sysInfo;
-
-    // General configuration (includes face settings, access settings, system settings, screen)
-    const generalConfig = await readConfig();
-    config.general_configuration = generalConfig;
-
-    // Load all known Control iD object tables
-    // Try every possible table name to discover what this firmware supports
-    const allObjects = [
-      // Working on iDFace Max 7.9.9/8.3.1
-      'access_rules', 'time_zones', 'identification_rules',
-      // Access related
-      'access_logs', 'access_log_access_rules', 'contingency_access_rules',
-      'time_zone_time_spans',
-      // Users/Groups
-      'groups', 'user_groups', 'users',
-      // Identification
-      'script_instances', 'scripts',
-      // Hardware
-      'actions', 'relays', 'inputs', 'outputs',
-      'portals', 'portal_access_rules', 'portal_actions',
-      // Cards
-      'cards', 'card_technologies',
-      // Configuration tables
-      'configurations', 'general', 'online',
-      'face', 'facial_recognition',
-      'catra', 'areas', 'area_access_rules',
-      // Notification
-      'notification_servers',
+    // All known configuration modules from Control iD API docs
+    const configModules = [
+      'face_id',       // Configurações Faciais: liveness_mode, min_detect_bounds_width, etc
+      'face_module',   // Configurações Faciais: light_threshold_led_activation
+      'led_white',     // Configurações Faciais: brightness (LED)
+      'display',       // Tela + Mensagens: custom_auth_message, brightness, timeout, language
+      'general',       // Sistema: local_identification, auto_reboot_hour, timezone, etc
+      'relay',         // Relés: relay1_enabled, relay1_timeout
+      'gpio',          // GPIOs: gpio1_mode, gpio1_enabled
+      'online',        // Online mode
+      'catra',         // Catraca
+      'sec_box',       // SecBox
+      'identifier',    // Identificação
+      'monitor',       // Monitoramento
     ];
 
-    for (const obj of allObjects) {
-      const data = await readObj(obj);
-      if (data && !data.error) {
-        config[obj] = data;
-      }
-    }
-
-    // Try specific configuration commands
-    const configCommands = [
-      'get_face_config', 'get_access_config', 'get_relay_config',
-      'get_screen_config', 'get_catra_config', 'get_general_config',
-      'get_online_config', 'get_notification_config',
-    ];
-
-    for (const cmd of configCommands) {
+    // Read each module by requesting it specifically
+    for (const mod of configModules) {
       try {
-        const data = await adapter.httpRequest(proto, device.ip_address, device.port, `/${cmd}.fcgi`, '{}', 10000, s);
+        // Method 1: Request specific module
+        const data = await adapter.httpRequest(proto, device.ip_address, device.port, '/get_configuration.fcgi',
+          JSON.stringify({ [mod]: [] }), 10000, s);
+        console.log(`[Template] get_configuration ${mod}:`, JSON.stringify(data));
         if (data && !data.error && Object.keys(data).length > 0) {
-          config[cmd.replace('get_', '')] = data;
+          config[mod] = data[mod] ?? data;
         }
       } catch { /* skip */ }
     }
+
+    // Also try full config dump
+    try {
+      const full = await adapter.httpRequest(proto, device.ip_address, device.port, '/get_configuration.fcgi', '{}', 10000, s);
+      console.log('[Template] Full get_configuration:', JSON.stringify(full));
+      if (full && !full.error) {
+        for (const [k, v] of Object.entries(full)) {
+          if (!config[k] && v && typeof v === 'object') config[k] = v;
+        }
+      }
+    } catch { /* skip */ }
+
+    // Read object tables (rules, zones, etc)
+    const objectTables = ['access_rules', 'time_zones', 'identification_rules',
+      'time_zone_time_spans', 'groups', 'portals', 'portal_access_rules',
+      'actions', 'portal_actions', 'contingency_access_rules', 'areas',
+      'script_instances'];
+
+    for (const obj of objectTables) {
+      try {
+        const data = await adapter.httpRequest(proto, device.ip_address, device.port, '/load_objects.fcgi',
+          JSON.stringify({ object: obj }), 10000, s);
+        if (data && !data.error) config[obj] = data;
+      } catch { /* skip */ }
+    }
+
+    // Device info for reference
+    const sysInfo = await adapter.httpRequest(proto, device.ip_address, device.port, '/system_information.fcgi', '{}', 10000, s);
+    config._device_info = {
+      model: sysInfo?.device_two_names ?? sysInfo?.device_name,
+      firmware: sysInfo?.version,
+      serial: sysInfo?.serial,
+    };
 
     await adapter.httpRequest(proto, device.ip_address, device.port, '/logout.fcgi', '{}', 5000, s).catch(() => {});
 
@@ -691,34 +699,29 @@ export function registerIpcHandlers(getWindow: () => BrowserWindow | null): void
 
         let applied = 0;
 
-        // Apply general configuration
-        if (config.general_configuration && Object.keys(config.general_configuration).length > 0) {
-          await adapter.httpRequest(proto, device.ip_address, device.port, '/set_configuration.fcgi',
-            JSON.stringify(config.general_configuration), 10000, s).catch(() => {});
-          applied++;
-        }
+        // Apply configuration modules via set_configuration.fcgi
+        // Each module is sent as { module_name: { field: value, ... } }
+        const configModules = ['face_id', 'face_module', 'led_white', 'display', 'general',
+          'relay', 'gpio', 'online', 'catra', 'sec_box', 'identifier', 'monitor'];
 
-        // Apply specific config endpoints
-        const setEndpoints: Record<string, string> = {
-          face_config: '/set_face_config.fcgi',
-          access_config: '/set_access_config.fcgi',
-          relay_config: '/set_relay_config.fcgi',
-          screen_config: '/set_screen_config.fcgi',
-        };
-
-        for (const [key, endpoint] of Object.entries(setEndpoints)) {
-          if (config[key] && Object.keys(config[key]).length > 0) {
-            await adapter.httpRequest(proto, device.ip_address, device.port, endpoint,
-              JSON.stringify(config[key]), 10000, s).catch(() => {});
+        for (const mod of configModules) {
+          if (config[mod] && typeof config[mod] === 'object' && Object.keys(config[mod]).length > 0) {
+            console.log(`[ApplyTemplate] Setting ${mod}:`, JSON.stringify(config[mod]));
+            await adapter.httpRequest(proto, device.ip_address, device.port, '/set_configuration.fcgi',
+              JSON.stringify({ [mod]: config[mod] }), 10000, s).catch(() => {});
             applied++;
           }
         }
 
-        // Apply objects via create_objects.fcgi (access_rules, time_zones, etc)
-        const objectTypes = ['access_rules', 'time_zones', 'messages', 'identification_rules', 'relay_rules', 'door_settings', 'alarm_settings'];
-        for (const objType of objectTypes) {
-          if (config[objType] && Array.isArray(config[objType])) {
-            for (const item of config[objType]) {
+        // Apply object tables via create_objects.fcgi
+        const objectTables = ['access_rules', 'time_zones', 'identification_rules',
+          'time_zone_time_spans', 'groups', 'portals', 'portal_access_rules',
+          'actions', 'portal_actions'];
+
+        for (const objType of objectTables) {
+          const objData = config[objType]?.[objType]; // { access_rules: { access_rules: [...] } }
+          if (Array.isArray(objData)) {
+            for (const item of objData) {
               await adapter.httpRequest(proto, device.ip_address, device.port, '/create_objects.fcgi',
                 JSON.stringify({ object: objType, values: [item] }), 10000, s).catch(() => {});
             }
