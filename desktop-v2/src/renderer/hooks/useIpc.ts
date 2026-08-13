@@ -23,11 +23,14 @@ export const ipc = {
   setTime: (id: string) => window.api.invoke('devices:set-time', id),
   factoryReset: (id: string, keepNetwork: boolean) => window.api.invoke('devices:factory-reset', { id, keepNetwork }),
   setNetwork: (id: string, network: any) => window.api.invoke('devices:set-network', { id, network }),
+  getNetwork: (id: string) => window.api.invoke('devices:get-network', id),
 
   // Batch
   batchReboot: (ids: string[]) => window.api.invoke('batch:reboot', ids),
   batchTestConnection: (ids: string[]) => window.api.invoke('batch:test-connection', ids),
   batchBackup: (ids: string[]) => window.api.invoke('batch:backup', ids),
+  batchChangeCredentials: (deviceIds: string[], newUsername: string, newPassword: string) =>
+    window.api.invoke('batch:change-credentials', { deviceIds, newUsername, newPassword }),
 
   // Discovery
   startScan: (request: any) => window.api.invoke('discovery:scan', request),
@@ -75,14 +78,6 @@ export const ipc = {
   backupConfig: (deviceId: string) => window.api.invoke('config:backup', deviceId),
   listBackups: (deviceId: string) => window.api.invoke('config:backups', deviceId),
   restoreConfig: (deviceId: string, backupId: string) => window.api.invoke('config:restore', { deviceId, backupId }),
-
-  // Templates
-  listTemplates: () => window.api.invoke('templates:list'),
-  createTemplateFromDevice: (deviceId: string, templateName: string) => window.api.invoke('templates:create-from-device', { deviceId, templateName }),
-  createTemplate: (data: any) => window.api.invoke('templates:create', data),
-  getTemplate: (id: string) => window.api.invoke('templates:get', id),
-  deleteTemplate: (id: string) => window.api.invoke('templates:delete', id),
-  applyTemplate: (templateId: string, deviceIds: string[]) => window.api.invoke('templates:apply', { templateId, deviceIds }),
 
   // Firmware
   firmwareSummary: () => window.api.invoke('firmware:summary'),

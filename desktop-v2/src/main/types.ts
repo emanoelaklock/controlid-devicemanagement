@@ -96,16 +96,6 @@ export interface AuditLog {
   createdAt: string;
 }
 
-export interface ConfigTemplate {
-  id: string;
-  name: string;
-  manufacturer: string;
-  model: string | null;       // null = applies to all models from manufacturer
-  config: string;             // JSON blob
-  createdAt: string;
-  updatedAt: string;
-}
-
 export interface ConfigBackup {
   id: string;
   deviceId: string;

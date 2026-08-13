@@ -150,18 +150,6 @@ function createSchema(): void {
   `);
 
   _db.run(`
-    CREATE TABLE IF NOT EXISTS config_templates (
-      id TEXT PRIMARY KEY NOT NULL,
-      name TEXT NOT NULL,
-      manufacturer TEXT NOT NULL,
-      model TEXT,
-      config TEXT NOT NULL DEFAULT '{}',
-      created_at TEXT NOT NULL DEFAULT (datetime('now','localtime')),
-      updated_at TEXT NOT NULL DEFAULT (datetime('now','localtime'))
-    )
-  `);
-
-  _db.run(`
     CREATE TABLE IF NOT EXISTS config_backups (
       id TEXT PRIMARY KEY NOT NULL,
       device_id TEXT NOT NULL REFERENCES devices(id) ON DELETE CASCADE,

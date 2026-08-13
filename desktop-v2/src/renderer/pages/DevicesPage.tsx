@@ -22,6 +22,9 @@ export default function DevicesPage() {
   const [addForm, setAddForm] = useState({ name: '', ip_address: '', port: 80, manufacturer: 'controlid', model: '' });
   const [filterGroup, setFilterGroup] = useState<string | null>(null);
   const [history, setHistory] = useState<any[]>([]);
+  const [netModal, setNetModal] = useState(false);
+  const [netSaving, setNetSaving] = useState(false);
+  const [netForm, setNetForm] = useState({ dhcp: false, ip: '', netmask: '255.255.255.0', gateway: '', primary_dns: '', secondary_dns: '' });
   const detailRef = useRef<any>(null); // keep detail in sync
 
   const load = useCallback(async () => {
@@ -110,6 +113,49 @@ export default function DevicesPage() {
     else setSelected(new Set(filtered.map(d => d.id)));
   };
 
+  const openNetworkModal = async () => {
+    const d = detail;
+    if (!d) return;
+    const gwGuess = (d.ip_address || '').split('.').slice(0, 3).join('.') + '.1';
+    setNetForm({ dhcp: !!d.dhcp_enabled, ip: d.ip_address || '', netmask: '255.255.255.0', gateway: gwGuess, primary_dns: '', secondary_dns: '' });
+    setNetModal(true);
+    // Prefill with the device's live config (netmask/gateway/DNS aren't in the DB).
+    // Deliberately doesn't touch f.dhcp: the DB value used above is kept fresh by
+    // the heartbeat, and overriding here would clobber a click made while loading.
+    try {
+      const net: any = await ipc.getNetwork(d.id);
+      if (net) setNetForm(f => ({
+        ...f,
+        ip: net.ip || f.ip,
+        netmask: net.netmask || f.netmask,
+        gateway: net.gateway || f.gateway,
+        primary_dns: net.primary_dns || net.dns_primary || '',
+        secondary_dns: net.secondary_dns || net.dns_secondary || '',
+      }));
+    } catch { /* device unreachable — keep defaults */ }
+  };
+
+  const applyNetwork = async () => {
+    const f = netForm;
+    if (f.dhcp) {
+      if (!(await ipc.confirm('Enable DHCP? The device may come back on a different IP — the app will relocate it by MAC automatically.'))) return;
+    } else {
+      if (!f.ip || !f.netmask || !f.gateway) { toast('IP, netmask and gateway are required for static IP.', 'warning'); return; }
+      if (!(await ipc.confirm(`Apply static IP ${f.ip} / ${f.netmask} (gw ${f.gateway})?`))) return;
+    }
+    setNetSaving(true);
+    try {
+      await ipc.setNetwork(detail.id, f.dhcp
+        ? { dhcp: true }
+        : { dhcp: false, ip: f.ip, netmask: f.netmask, gateway: f.gateway,
+            primary_dns: f.primary_dns || undefined, secondary_dns: f.secondary_dns || undefined });
+      toast(f.dhcp ? 'DHCP enabled. Waiting for the device to reconnect...' : `Static IP ${f.ip} applied. Reconnecting...`, 'success');
+      setNetModal(false);
+      setTimeout(load, 4000);
+    } catch (e: any) { toast(`Network change failed: ${e.message || e}`, 'error'); }
+    finally { setNetSaving(false); }
+  };
+
   const handleAdd = async () => {
     if (!addForm.ip_address) return;
     await ipc.createDevice({ ...addForm, name: addForm.name || addForm.ip_address });
@@ -121,6 +167,17 @@ export default function DevicesPage() {
   const handleBatchReboot = async () => {
     if (!(await ipc.confirm(`Reboot ${selected.size} device(s)?`))) return;
     await ipc.batchReboot(Array.from(selected));
+    setSelected(new Set());
+  };
+
+  const handleBatchCredentials = async () => {
+    const username = await ipc.prompt('Set Credentials', `New login for ${selected.size} device(s) (web + API):`, 'admin');
+    if (!username) return;
+    const password = await ipc.prompt('Set Credentials', `New password for user "${username}":`);
+    if (!password) return;
+    if (!(await ipc.confirm(`Change login on ${selected.size} device(s) to "${username}"? The app will re-link them to the new credential automatically.`))) return;
+    await ipc.batchChangeCredentials(Array.from(selected), username, password);
+    toast('Credential change started — see Tasks page for results', 'info');
     setSelected(new Set());
   };
 
@@ -217,6 +274,7 @@ export default function DevicesPage() {
               <span className="text-xs text-brand-400">{selected.size} selected</span>
               <button onClick={handleBatchTest} className="px-3 py-1.5 bg-blue-600 text-white text-xs rounded-lg hover:bg-blue-700">Test</button>
               <button onClick={() => ipc.batchBackup(Array.from(selected))} className="px-3 py-1.5 bg-slate-600 text-white text-xs rounded-lg hover:bg-slate-500">Backup</button>
+              <button onClick={handleBatchCredentials} className="px-3 py-1.5 bg-purple-600 text-white text-xs rounded-lg hover:bg-purple-700">Set Credentials</button>
               <button onClick={handleBatchReboot} className="px-3 py-1.5 bg-amber-600 text-white text-xs rounded-lg hover:bg-amber-700">Reboot</button>
             </div>
           )}
@@ -433,6 +491,9 @@ export default function DevicesPage() {
               try { await ipc.setTime(detail.id); toast('Device time synchronized.', 'success'); } catch (e: any) { toast(`Error: ${e.message}`, 'error'); }
             }} disabled={!detail.credential_id}
               className="w-full px-3 py-2 bg-slate-700 text-white text-xs rounded-lg hover:bg-slate-600 disabled:opacity-40 disabled:cursor-not-allowed">Sync Date/Time</button>
+            <button onClick={openNetworkModal} disabled={!detail.credential_id}
+              className="w-full px-3 py-2 bg-cyan-700 text-white text-xs rounded-lg hover:bg-cyan-600 disabled:opacity-40 disabled:cursor-not-allowed">
+              Network (DHCP / Static IP)</button>
             <button onClick={async () => {
               if (!(await ipc.confirm('FACTORY RESET: This will erase all data on the device. Keep network settings?'))) return;
               const keepNet = await ipc.confirm('Preserve network configuration (IP, DHCP)?');
@@ -441,6 +502,58 @@ export default function DevicesPage() {
               className="w-full px-3 py-2 bg-red-900/60 text-red-300 text-xs rounded-lg hover:bg-red-800 disabled:opacity-40 disabled:cursor-not-allowed">Factory Reset</button>
             <button onClick={() => handleDelete(detail.id)}
               className="w-full px-3 py-2 bg-red-700/60 text-red-200 text-xs rounded-lg hover:bg-red-700">Delete Device</button>
+          </div>
+        </div>
+      )}
+
+      {/* Network configuration modal */}
+      {netModal && detail && (
+        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50"
+          onClick={() => { if (!netSaving) setNetModal(false); }}>
+          <div className="bg-slate-900 border border-slate-700 rounded-xl p-5 w-[26rem] shadow-2xl" onClick={e => e.stopPropagation()}>
+            <h3 className="text-sm font-semibold text-white mb-1">Network Configuration</h3>
+            <p className="text-xs text-slate-500 mb-4 truncate">{detail.name || detail.ip_address} · {detail.ip_address}:{detail.port}</p>
+            <div className="flex gap-2 mb-4">
+              <button onClick={() => setNetForm({ ...netForm, dhcp: true })}
+                className={`flex-1 px-3 py-2 text-xs rounded-lg border ${netForm.dhcp
+                  ? 'bg-cyan-700 border-cyan-500 text-white'
+                  : 'bg-slate-800 border-slate-700 text-slate-400 hover:text-white'}`}>
+                DHCP (automatic)
+              </button>
+              <button onClick={() => setNetForm({ ...netForm, dhcp: false })}
+                className={`flex-1 px-3 py-2 text-xs rounded-lg border ${!netForm.dhcp
+                  ? 'bg-cyan-700 border-cyan-500 text-white'
+                  : 'bg-slate-800 border-slate-700 text-slate-400 hover:text-white'}`}>
+                Static IP
+              </button>
+            </div>
+            {netForm.dhcp ? (
+              <p className="text-xs text-amber-400/90 mb-4">
+                The device will get its IP from the DHCP server. If the IP changes,
+                the app relocates the device automatically by MAC address.
+              </p>
+            ) : (
+              <div className="space-y-2 mb-4">
+                {([
+                  ['IP address', 'ip'], ['Netmask', 'netmask'], ['Gateway', 'gateway'],
+                  ['DNS primary (optional)', 'primary_dns'], ['DNS secondary (optional)', 'secondary_dns'],
+                ] as const).map(([label, key]) => (
+                  <div key={key} className="flex items-center gap-2">
+                    <span className="text-xs text-slate-500 w-36 flex-shrink-0">{label}</span>
+                    <input value={(netForm as any)[key]} onChange={e => setNetForm({ ...netForm, [key]: e.target.value })}
+                      className="flex-1 px-2 py-1.5 bg-slate-800 border border-slate-700 rounded text-sm text-white font-mono" />
+                  </div>
+                ))}
+              </div>
+            )}
+            <div className="flex justify-end gap-2">
+              <button onClick={() => setNetModal(false)} disabled={netSaving}
+                className="px-3 py-1.5 bg-slate-800 text-slate-300 text-xs rounded-lg hover:bg-slate-700 disabled:opacity-40">Cancel</button>
+              <button onClick={applyNetwork} disabled={netSaving}
+                className="px-4 py-1.5 bg-emerald-600 text-white text-xs rounded-lg hover:bg-emerald-700 disabled:opacity-40">
+                {netSaving ? 'Applying...' : 'Apply'}
+              </button>
+            </div>
           </div>
         </div>
       )}

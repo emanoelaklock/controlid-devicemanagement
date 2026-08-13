@@ -15,23 +15,55 @@ export class DiscoveryService {
   private activeScans = new Map<string, { cancelled: boolean }>();
 
   parseRange(range: string): string[] {
+    const trimmed = range.trim();
     const ips: string[] = [];
-    if (range.includes('*')) {
-      const parts = range.split('.');
-      if (parts.indexOf('*') === 3) {
-        for (let i = 1; i <= 254; i++) { parts[3] = String(i); ips.push(parts.join('.')); }
+    const MAX = 65536; // guard against an accidentally huge scan
+
+    if (trimmed.includes('*')) {
+      // Single "*" wildcard in any one octet (e.g. 192.168.1.* or 192.168.*.5).
+      const parts = trimmed.split('.');
+      if (parts.length !== 4 || parts.filter(p => p === '*').length !== 1 ||
+          parts.some(p => p !== '*' && !this.isOctet(p))) {
+        throw new Error(`Invalid range "${range}": use a single "*" in one octet, e.g. 192.168.1.*`);
       }
-    } else if (range.includes('-')) {
-      const [startStr, endStr] = range.split('-');
-      const startParts = startStr.trim().split('.').map(Number);
-      const endLast = endStr.trim().includes('.') ? Number(endStr.trim().split('.')[3]) : Number(endStr.trim());
-      for (let i = startParts[3]; i <= endLast; i++) {
-        ips.push(`${startParts[0]}.${startParts[1]}.${startParts[2]}.${i}`);
+      const idx = parts.indexOf('*');
+      for (let i = 1; i <= 254; i++) {
+        const copy = parts.slice();
+        copy[idx] = String(i);
+        ips.push(copy.join('.'));
       }
+    } else if (trimmed.includes('-')) {
+      // Dash range: full-IP endpoints (any subnet span) or "start-lastOctet".
+      const [startStr, endStr] = trimmed.split('-').map(s => s.trim());
+      const start = this.ipToInt(startStr);
+      const end = endStr.includes('.')
+        ? this.ipToInt(endStr)
+        : (this.isOctet(endStr) ? (((start & 0xffffff00) | Number(endStr)) >>> 0) : NaN);
+      if (Number.isNaN(start) || Number.isNaN(end) || end < start) {
+        throw new Error(`Invalid range "${range}": expected forms like 192.168.1.10-254 or 192.168.1.10-192.168.2.20`);
+      }
+      if (end - start + 1 > MAX) {
+        throw new Error(`Range "${range}" is too large (${end - start + 1} addresses); please narrow it down.`);
+      }
+      for (let i = start; i <= end; i++) ips.push(this.intToIp(i));
     } else {
-      ips.push(range.trim());
+      ips.push(trimmed);
     }
     return ips;
+  }
+
+  private isOctet(s: string): boolean {
+    return /^\d{1,3}$/.test(s) && Number(s) >= 0 && Number(s) <= 255;
+  }
+
+  private ipToInt(ip: string): number {
+    const p = ip.split('.');
+    if (p.length !== 4 || !p.every(o => this.isOctet(o))) return NaN;
+    return ((Number(p[0]) << 24) | (Number(p[1]) << 16) | (Number(p[2]) << 8) | Number(p[3])) >>> 0;
+  }
+
+  private intToIp(n: number): string {
+    return `${(n >>> 24) & 255}.${(n >>> 16) & 255}.${(n >>> 8) & 255}.${n & 255}`;
   }
 
   async startScan(request: DiscoveryRequest, window: BrowserWindow | null): Promise<string> {
@@ -134,8 +166,15 @@ export class DiscoveryService {
                 https_enabled: (fullInfo?.httpsEnabled || device.httpsEnabled) ? 1 : 0,
                 dhcp_enabled: fullInfo?.dhcpEnabled ? 1 : 0,
                 credential_id: usedCredentialId,
-                last_heartbeat: authenticated ? new Date().toISOString() : null,
+                last_heartbeat: authenticated ? nowLocal() : null,
               };
+
+              // Final synchronous existence check before inserting: sibling tasks
+              // for the same IP on different ports (e.g. 80 and 443) interleave
+              // across the awaits above. sql.js is synchronous, so nothing can slip
+              // between this SELECT and the INSERT — this closes the duplicate race.
+              const dupe = query('SELECT id FROM devices WHERE ip_address = ?', [ip]);
+              if (dupe.length > 0) break;
 
               // Insert into DB
               const cols = Object.keys(deviceData).join(',');
@@ -186,11 +225,15 @@ export class DiscoveryService {
       await Promise.allSettled(promises);
     }
 
-    run(`UPDATE jobs SET status='completed', completed_at='${nowLocal()}', completed_items=?, progress=100 WHERE id=?`,
-      [completed, jobId]);
+    // Don't overwrite a 'cancelled' status the user just set with 'completed'.
+    const finalStatus = state.cancelled ? 'cancelled' : 'completed';
+    const finalProgress = state.cancelled && ips.length > 0
+      ? Math.round((completed / ips.length) * 100) : 100;
+    run(`UPDATE jobs SET status=?, completed_at='${nowLocal()}', completed_items=?, progress=? WHERE id=?`,
+      [finalStatus, completed, finalProgress, jobId]);
 
     if (window && !window.isDestroyed()) {
-      window.webContents.send('discovery:complete', { jobId, total: results.length });
+      window.webContents.send('discovery:complete', { jobId, total: results.length, cancelled: state.cancelled });
     }
 
     this.activeScans.delete(jobId);

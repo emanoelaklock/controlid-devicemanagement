@@ -54,7 +54,9 @@ export class JobService {
   getJob(jobId: string): { job: Job; items: JobItem[] } | null {
     const job = queryOne('SELECT * FROM jobs WHERE id = ?', [jobId]);
     if (!job) return null;
-    const items = query('SELECT * FROM job_items WHERE job_id = ?', [jobId]);
+    const items = query(`SELECT ji.*, d.name as device_name, d.ip_address
+      FROM job_items ji LEFT JOIN devices d ON ji.device_id = d.id
+      WHERE ji.job_id = ?`, [jobId]);
     return { job, items };
   }
 

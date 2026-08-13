@@ -36,10 +36,16 @@ export default function DiscoveryPage() {
     setScanning(true);
     setResults([]);
     setProgress({ completed: 0, total: 0, progress: 0, found: 0 });
-    const ranges = ipRange.split(',').map(r => r.trim());
+    const ranges = ipRange.split(',').map(r => r.trim()).filter(Boolean);
     const portList = ports.split(',').map(p => parseInt(p.trim(), 10)).filter(p => !isNaN(p));
-    const id = await ipc.startScan({ ranges, ports: portList, timeout, concurrency });
-    setJobId(id);
+    try {
+      const id = await ipc.startScan({ ranges, ports: portList, timeout, concurrency });
+      setJobId(id);
+    } catch (err: any) {
+      // e.g. an invalid IP range rejected by parseRange
+      toast(`Could not start scan: ${err.message || err}`);
+      setScanning(false);
+    }
   };
 
   const cancelScan = () => {

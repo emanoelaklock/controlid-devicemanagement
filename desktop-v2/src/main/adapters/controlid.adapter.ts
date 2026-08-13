@@ -1,6 +1,7 @@
 import https from 'https';
 import http from 'http';
 import { DeviceAdapter, DeviceConnection, DeviceInfo, DiscoveredDevice } from '../types';
+import { CONFIG_CATALOG, moduleReadSpec } from '../../shared/controlid.catalog';
 
 const httpsAgent = new https.Agent({ rejectUnauthorized: false });
 
@@ -65,12 +66,8 @@ export class ControlIdAdapter implements DeviceAdapter {
       const loginRes = await this.httpRequest(proto, ip, port, '/login.fcgi', JSON.stringify({ login: username, password }), 10000);
       if (loginRes?.session) {
         const info = await this.httpRequest(proto, ip, port, '/system_information.fcgi', '{}', 10000, loginRes.session);
-
-        // Also try to get network config for MAC and DHCP
-        const netConfig = await this.httpRequest(proto, ip, port, '/get_configuration.fcgi', '{}', 10000, loginRes.session).catch(() => null);
-
         await this.httpRequest(proto, ip, port, '/logout.fcgi', '{}', 5000, loginRes.session).catch(() => {});
-        return this.buildDeviceInfo(info, proto, netConfig);
+        return this.buildDeviceInfo(info, proto);
       }
     } catch { /* try next */ }
 
@@ -100,9 +97,8 @@ export class ControlIdAdapter implements DeviceAdapter {
     const session = await this.login(conn);
     const proto = conn.port === 443 ? 'https' : 'http';
     const info = await this.httpRequest(proto, conn.ip, conn.port, '/system_information.fcgi', '{}', 10000, session);
-    const netConfig = await this.httpRequest(proto, conn.ip, conn.port, '/get_configuration.fcgi', '{}', 10000, session).catch(() => null);
     await this.httpRequest(proto, conn.ip, conn.port, '/logout.fcgi', '{}', 5000, session).catch(() => {});
-    return this.buildDeviceInfo(info, proto, netConfig);
+    return this.buildDeviceInfo(info, proto);
   }
 
   async reboot(conn: DeviceConnection): Promise<boolean> {
@@ -125,45 +121,163 @@ export class ControlIdAdapter implements DeviceAdapter {
     } catch { return false; }
   }
 
+  /**
+   * Read device configuration via get_configuration.fcgi.
+   * The API requires an explicit list of module+field names; an empty body
+   * returns {}. Reads module-by-module so an unsupported module on a given
+   * model/firmware doesn't abort the whole capture.
+   */
   async getConfig(conn: DeviceConnection): Promise<Record<string, unknown>> {
     const session = await this.login(conn);
     const proto = conn.port === 443 ? 'https' : 'http';
-    const config = await this.httpRequest(proto, conn.ip, conn.port, '/get_configuration.fcgi', '{}', 10000, session);
-    await this.httpRequest(proto, conn.ip, conn.port, '/logout.fcgi', '{}', 5000, session).catch(() => {});
-    return config ?? {};
+    const result: Record<string, unknown> = {};
+    try {
+      for (const mod of CONFIG_CATALOG) {
+        try {
+          const data = await this.httpRequest(proto, conn.ip, conn.port, '/get_configuration.fcgi',
+            JSON.stringify(moduleReadSpec(mod)), 10000, session);
+          const values = data?.[mod.module];
+          if (values && typeof values === 'object' && !data.error && Object.keys(values).length > 0) {
+            // Merge: large modules (e.g. "general") are split into multiple
+            // catalog chunks so one unsupported chunk doesn't lose the others.
+            result[mod.module] = { ...(result[mod.module] as object ?? {}), ...values };
+          }
+        } catch { /* module not supported on this model — skip */ }
+      }
+    } finally {
+      await this.httpRequest(proto, conn.ip, conn.port, '/logout.fcgi', '{}', 5000, session).catch(() => {});
+    }
+    return result;
   }
 
+  /**
+   * Apply configuration via set_configuration.fcgi.
+   * Body format: {module: {field: "value"}} with ALL values as strings.
+   * Applies module-by-module; returns true if at least one module succeeded.
+   */
   async setConfig(conn: DeviceConnection, config: Record<string, unknown>): Promise<boolean> {
     try {
       const session = await this.login(conn);
       const proto = conn.port === 443 ? 'https' : 'http';
-      await this.httpRequest(proto, conn.ip, conn.port, '/set_configuration.fcgi', JSON.stringify(config), 10000, session);
+      let anyOk = false;
+      for (const [module, values] of Object.entries(config)) {
+        if (!values || typeof values !== 'object') continue;
+        const stringified: Record<string, string> = {};
+        for (const [k, v] of Object.entries(values as Record<string, unknown>)) {
+          if (v === null || v === undefined || v === '') continue;
+          stringified[k] = String(v);
+        }
+        if (Object.keys(stringified).length === 0) continue;
+        try {
+          const res = await this.httpRequest(proto, conn.ip, conn.port, '/set_configuration.fcgi',
+            JSON.stringify({ [module]: stringified }), 10000, session);
+          if (!res?.error) anyOk = true;
+        } catch { /* skip module */ }
+      }
       await this.httpRequest(proto, conn.ip, conn.port, '/logout.fcgi', '{}', 5000, session).catch(() => {});
-      return true;
+      return anyOk;
     } catch { return false; }
   }
 
+  /**
+   * Read the current "network" block from system_information.fcgi
+   * (ip, netmask, gateway, dns_primary, dns_secondary, dhcp_enabled, ...).
+   * Used to prefill the network dialog and to build safe set_system_network payloads.
+   */
+  async getNetwork(conn: DeviceConnection): Promise<Record<string, unknown>> {
+    const session = await this.login(conn);
+    const proto = conn.port === 443 ? 'https' : 'http';
+    try {
+      const info = await this.httpRequest(proto, conn.ip, conn.port, '/system_information.fcgi', '{}', 10000, session);
+      return (info?.network && typeof info.network === 'object') ? info.network : {};
+    } finally {
+      await this.httpRequest(proto, conn.ip, conn.port, '/logout.fcgi', '{}', 5000, session).catch(() => {});
+    }
+  }
+
+  /**
+   * Change network settings via POST /set_system_network.fcgi, mirroring the
+   * exact payload the device's own web UI sends (verified against fw 8.7.3
+   * bundle): the FULL network object — interface "1", ip, netmask, gateway,
+   * primary_dns, secondary_dns (NOT dns_primary/dns_secondary as the docs say),
+   * custom_hostname_enabled, device_hostname, web_server_port, ssl_enabled,
+   * self_signed_certificate, ten_mbps, dhcp_enabled — with `changes` overlaid
+   * on the device's current config.
+   * CAVEATS: set_configuration.fcgi does NOT apply network settings, and a
+   * device still in first-login state (factory credentials) rejects this
+   * command with 401 "Invalid access level" — detected and reported clearly.
+   */
+  async setNetwork(conn: DeviceConnection, changes: Record<string, unknown>): Promise<boolean> {
+    const { session, message } = await this.loginFull(conn);
+    if (/first web login/i.test(message || '')) {
+      throw new Error('Device still has factory-default credentials, so the firmware blocks network changes. Use "Set Credentials" to set a new device login/password, then retry.');
+    }
+    const proto = conn.port === 443 ? 'https' : 'http';
+
+    // Read current config so the request is always the full object the web UI sends
+    const info = await this.httpRequest(proto, conn.ip, conn.port, '/system_information.fcgi', '{}', 10000, session);
+    const cur = (info?.network && typeof info.network === 'object') ? info.network : {};
+
+    const payload: Record<string, unknown> = {
+      interface: '1', // Ethernet ("2" is Wi-Fi)
+      ip: cur.ip, netmask: cur.netmask, gateway: cur.gateway,
+      primary_dns: cur.primary_dns ?? cur.dns_primary ?? '8.8.8.8',
+      secondary_dns: cur.secondary_dns ?? cur.dns_secondary ?? '8.8.4.4',
+      custom_hostname_enabled: !!cur.custom_hostname_enabled,
+      device_hostname: cur.device_hostname ?? '',
+      web_server_port: Number(cur.web_server_port) || conn.port,
+      ssl_enabled: !!cur.ssl_enabled,
+      self_signed_certificate: !!cur.self_signed_certificate,
+      ten_mbps: !!cur.ten_mbps, // preserve current link speed (web UI hardcodes false)
+      dhcp_enabled: !!cur.dhcp_enabled,
+      ...changes,
+    };
+
+    const res = await this.httpRequest(proto, conn.ip, conn.port, '/set_system_network.fcgi',
+      JSON.stringify(payload), 10000, session);
+    if (res?.error) throw new Error(typeof res.error === 'string' ? res.error : JSON.stringify(res.error));
+    // Don't logout: the device may already be re-applying network settings
+    return true;
+  }
+
+  /**
+   * Change the device's login credentials (same credential used by the web
+   * interface and the API). Official endpoint: POST /change_login.fcgi with
+   * {login, password} — the call returns no body on success.
+   */
   async changePassword(conn: DeviceConnection, newUsername: string, newPassword: string): Promise<boolean> {
     try {
       const session = await this.login(conn);
       const proto = conn.port === 443 ? 'https' : 'http';
-      await this.httpRequest(proto, conn.ip, conn.port, '/set_configuration.fcgi',
-        JSON.stringify({ admin: { login: newUsername, password: newPassword } }), 10000, session);
+      const res = await this.httpRequest(proto, conn.ip, conn.port, '/change_login.fcgi',
+        JSON.stringify({ login: newUsername, password: newPassword }), 10000, session);
+      if (res?.error) return false;
       await this.httpRequest(proto, conn.ip, conn.port, '/logout.fcgi', '{}', 5000, session).catch(() => {});
-      return true;
+      // Verify: the old session may be invalidated — confirm the new credential works
+      const verified = await this.authenticate(conn.ip, conn.port, newUsername, newPassword);
+      return verified !== null;
     } catch { return false; }
   }
 
   // ─── Private helpers ────────────────────────────────────────────
 
   private async login(conn: DeviceConnection): Promise<string> {
+    return (await this.loginFull(conn)).session;
+  }
+
+  /**
+   * Login preserving the response message. Firmware in first-login state
+   * (factory credentials) answers "First Web Login. Please Change the
+   * Credentials" and blocks privileged commands like set_system_network.
+   */
+  private async loginFull(conn: DeviceConnection): Promise<{ session: string; message?: string }> {
     const proto = conn.port === 443 ? 'https' : 'http';
 
     // Try .fcgi login first
     try {
       const res = await this.httpRequest(proto, conn.ip, conn.port, '/login.fcgi',
         JSON.stringify({ login: conn.username, password: conn.password }), 10000);
-      if (res?.session) return res.session;
+      if (res?.session) return { session: res.session, message: res.message };
     } catch { /* try next */ }
 
     // Try new API login
@@ -171,7 +285,7 @@ export class ControlIdAdapter implements DeviceAdapter {
       const res = await this.httpRequest(proto, conn.ip, conn.port, '/api/login',
         JSON.stringify({ login: conn.username, password: conn.password }), 10000);
       if (res?.session || res?.token || res?.access_token) {
-        return res.session || res.token || res.access_token;
+        return { session: res.session || res.token || res.access_token, message: res?.message };
       }
     } catch { /* fallthrough */ }
 
@@ -237,10 +351,15 @@ export class ControlIdAdapter implements DeviceAdapter {
     protocol: string, ip: string, port: number, path: string,
     body: string, timeoutMs: number, session?: string
   ): Promise<any> {
+    // Official API expects the session as a query parameter (?session=...).
+    // Some endpoints (get/set_configuration) silently ignore cookie-based sessions.
+    const fullPath = session
+      ? `${path}${path.includes('?') ? '&' : '?'}session=${encodeURIComponent(session)}`
+      : path;
     return new Promise((resolve, reject) => {
       const mod = protocol === 'https' ? https : http;
       const options: https.RequestOptions = {
-        hostname: ip, port, path, method: 'POST', timeout: timeoutMs,
+        hostname: ip, port, path: fullPath, method: 'POST', timeout: timeoutMs,
         headers: {
           'Content-Type': 'application/json',
           'Content-Length': Buffer.byteLength(body),
@@ -265,13 +384,16 @@ export class ControlIdAdapter implements DeviceAdapter {
     protocol: string, ip: string, port: number, path: string,
     timeoutMs: number, session?: string, authHeader?: string
   ): Promise<any> {
+    const fullPath = session
+      ? `${path}${path.includes('?') ? '&' : '?'}session=${encodeURIComponent(session)}`
+      : path;
     return new Promise((resolve, reject) => {
       const mod = protocol === 'https' ? https : http;
       const headers: Record<string, string> = { 'Accept': 'application/json' };
       if (session) headers['Cookie'] = `session=${session}`;
       if (authHeader) headers['Authorization'] = authHeader;
       const options: https.RequestOptions = {
-        hostname: ip, port, path, method: 'GET', timeout: timeoutMs,
+        hostname: ip, port, path: fullPath, method: 'GET', timeout: timeoutMs,
         headers,
         ...(protocol === 'https' ? { agent: httpsAgent } : {}),
       };

@@ -10,8 +10,8 @@ contextBridge.exposeInMainWorld('api', {
     const allowedChannels = [
       'devices:list', 'devices:get', 'devices:create', 'devices:update', 'devices:delete',
       'devices:test-connection', 'devices:locate', 'devices:reboot', 'devices:open-door',
-      'devices:set-time', 'devices:factory-reset',
-      'batch:reboot', 'batch:test-connection', 'batch:backup',
+      'devices:set-time', 'devices:factory-reset', 'devices:set-network', 'devices:get-network',
+      'batch:reboot', 'batch:test-connection', 'batch:backup', 'batch:change-credentials',
       'discovery:scan', 'discovery:cancel',
       'credentials:list', 'credentials:create', 'credentials:update', 'credentials:delete', 'credentials:set-default',
       'jobs:list', 'jobs:get', 'jobs:cancel',

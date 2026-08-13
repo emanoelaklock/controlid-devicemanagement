@@ -68,15 +68,23 @@ export default function JobsPage() {
           </div>
           <div className="p-4">
             <p className="text-sm text-white mb-4">{detail.job.title}</p>
-            <div className="space-y-2">
+            <div className="space-y-3">
               {detail.items.map((item: any) => (
-                <div key={item.id} className="flex items-center gap-2 text-xs">
-                  <span className={`w-2 h-2 rounded-full flex-shrink-0 ${
-                    item.status === 'success' ? 'bg-emerald-500' : item.status === 'failed' ? 'bg-red-500' :
-                    item.status === 'running' ? 'bg-blue-500' : 'bg-slate-500'
-                  }`} />
-                  <span className="text-slate-400 flex-1 truncate">{item.device_id}</span>
-                  <span className="text-slate-600">{item.status}</span>
+                <div key={item.id} className="text-xs">
+                  <div className="flex items-center gap-2">
+                    <span className={`w-2 h-2 rounded-full flex-shrink-0 ${
+                      item.status === 'success' ? 'bg-emerald-500' : item.status === 'failed' ? 'bg-red-500' :
+                      item.status === 'running' ? 'bg-blue-500' : 'bg-slate-500'
+                    }`} />
+                    <span className="text-slate-300 flex-1 truncate">{item.device_name || item.device_id}</span>
+                    {item.ip_address && <span className="text-slate-600 font-mono">{item.ip_address}</span>}
+                    <span className="text-slate-600">{item.status}</span>
+                  </div>
+                  {item.message && (
+                    <p className={`ml-4 mt-0.5 break-words ${item.status === 'failed' ? 'text-red-400/80' : 'text-slate-500'}`}>
+                      {item.message}
+                    </p>
+                  )}
                 </div>
               ))}
             </div>

@@ -29,7 +29,7 @@ export default function DashboardPage() {
       firmwareVersions.set(d.firmware_version, list);
     }
   });
-  const uniqueFirmwares = Array.from(firmwareVersions.entries()).sort((a, b) => b[0].localeCompare(a[0]));
+  const uniqueFirmwares = Array.from(firmwareVersions.entries()).sort((a, b) => b[0].localeCompare(a[0], undefined, { numeric: true }));
   const latestFirmware = uniqueFirmwares[0]?.[0];
   const outdatedFirmware = devices.filter(d => d.firmware_version && d.firmware_version !== latestFirmware);
 
