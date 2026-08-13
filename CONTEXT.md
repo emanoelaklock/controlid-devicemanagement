@@ -132,6 +132,19 @@ Electron 32 | React 18 | Tailwind CSS (dark) | Vite 5 | sql.js (SQLite WASM) | I
 | POST /set_configuration.fcgi | ⚠️ | timezone funciona, rede não aplica |
 | GET /logo.fcgi?id=N | ⚠️ | Lê logo, não testado escrita |
 
+## Pendências (resolver depois)
+
+Relacionadas ao empacotamento do `.exe` (`npm run dist` → `release/ControlID-DeviceManager-Setup-<versão>.exe`):
+
+- [ ] **Code signing**: a build NÃO é assinada → Windows SmartScreen mostra "aplicativo
+      não reconhecido" no 1º run (funciona via "Mais informações → Executar assim mesmo").
+      Resolver exige certificado de code signing (pago) + configurar no electron-builder.
+- [ ] **Ícone do app**: usa o ícone padrão do Electron. O `package.json` referencia
+      `assets/icon.ico`, que não existe. Adicionar `desktop-v2/assets/icon.ico` e rebuildar.
+- [ ] **Auto-update / GitHub Release**: `publish` (GitHub) + `electron-updater` já
+      configurados. Para ativar a atualização automática, publicar o release com o
+      instalador + `latest.yml`: `gh release create v<versão> release/ControlID-DeviceManager-Setup-<versão>.exe release/latest.yml`.
+
 ## Como rodar
 
 ```bash
