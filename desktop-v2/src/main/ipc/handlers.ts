@@ -792,6 +792,38 @@ export function registerIpcHandlers(getWindow: () => BrowserWindow | null): void
     return result.response === 1;
   });
 
+  ipcMain.handle('devices:download-logs', async (_e, { id, kind }: { id: string; kind: 'diagnostic' | 'audit' }) => {
+    const device = queryOne(`SELECT d.*, c.username, c.password as cred_password
+      FROM devices d LEFT JOIN credentials c ON d.credential_id = c.id WHERE d.id = ?`, [id]);
+    if (!device) throw new Error('Device not found');
+    const adapter = adapterRegistry.get(device.manufacturer) as any;
+    if (!adapter?.downloadLog) throw new Error('Adapter does not support log download');
+
+    const conn: DeviceConnection = { ip: device.ip_address, port: device.port,
+      username: device.username || 'admin', password: device.cred_password ? decrypt(device.cred_password) : '' };
+    const text = await adapter.downloadLog(conn, kind);
+
+    const win = getWindow();
+    if (!win) return { cancelled: true };
+    const safe = (s: any) => String(s ?? '').replace(/[^\w.-]/g, '_');
+    const stamp = nowLocal().replace(/[: ]/g, '-');
+    const prefix = kind === 'audit' ? 'Audit_logs' : 'ACFW_log';
+    const defaultName = `${prefix}_${safe(device.model || 'device')}_${safe(device.serial_number || device.ip_address)}_${stamp}.txt`;
+    const { filePath } = await dialog.showSaveDialog(win, {
+      title: kind === 'audit' ? 'Save Audit Logs' : 'Save Diagnostic Logs',
+      defaultPath: defaultName,
+      filters: [{ name: 'Text', extensions: ['txt'] }],
+    });
+    if (!filePath) return { cancelled: true };
+
+    fs.writeFileSync(filePath, text, 'utf-8');
+    run(`INSERT INTO audit_logs (id, action, category, device_id, device_name, details, severity, created_at) VALUES (?,?,?,?,?,?,?,?)`,
+      [uuid(), 'logs_downloaded', 'device', id, device.name,
+       `${kind === 'audit' ? 'Audit' : 'Diagnostic'} logs saved (${text.length} bytes)`, 'info', nowLocal()]);
+    shell.showItemInFolder(filePath);
+    return { saved: filePath };
+  });
+
   // ─── Export ────────────────────────────────────────────────────
 
   ipcMain.handle('export:devices-csv', async () => {

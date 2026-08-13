@@ -511,6 +511,19 @@ export default function DevicesPage() {
             }} disabled={!detail.credential_id}
               className="w-full px-3 py-2 bg-indigo-700 text-white text-xs rounded-lg hover:bg-indigo-600 disabled:opacity-40 disabled:cursor-not-allowed">
               Finish Setup (stuck on wizard)</button>
+            <div className="flex gap-2">
+              {([['Diagnostic Logs', 'diagnostic'], ['Audit Logs', 'audit']] as const).map(([label, kind]) => (
+                <button key={kind} onClick={async () => {
+                  try {
+                    toast(`Generating ${label.toLowerCase()}...`, 'info');
+                    const r = await ipc.downloadLogs(detail.id, kind);
+                    if (r?.saved) toast(`${label} saved.`, 'success');
+                  } catch (e: any) { toast(`Log download failed: ${e.message || e}`, 'error'); }
+                }} disabled={!detail.credential_id}
+                  className="flex-1 px-3 py-2 bg-slate-700 text-white text-xs rounded-lg hover:bg-slate-600 disabled:opacity-40 disabled:cursor-not-allowed">
+                  {label}</button>
+              ))}
+            </div>
             <button onClick={async () => {
               if (!(await ipc.confirm('FACTORY RESET: This will erase all data on the device. Keep network settings?'))) return;
               const keepNet = await ipc.confirm('Preserve network configuration (IP, DHCP)?');

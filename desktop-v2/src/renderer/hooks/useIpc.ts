@@ -25,6 +25,7 @@ export const ipc = {
   setNetwork: (id: string, network: any) => window.api.invoke('devices:set-network', { id, network }),
   getNetwork: (id: string) => window.api.invoke('devices:get-network', id),
   finishSetup: (id: string, country?: string) => window.api.invoke('devices:finish-setup', { id, country }),
+  downloadLogs: (id: string, kind: 'diagnostic' | 'audit') => window.api.invoke('devices:download-logs', { id, kind }),
 
   // Batch
   batchReboot: (ids: string[]) => window.api.invoke('batch:reboot', ids),

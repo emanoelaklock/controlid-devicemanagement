@@ -329,6 +329,26 @@ export class ControlIdAdapter implements DeviceAdapter {
   }
 
   /**
+   * Download a device log as plain text (both endpoints return text/plain, which
+   * the device web UI saves as a .txt file):
+   *  - 'diagnostic': POST /get_ac_log.fcgi (full device/firmware log)
+   *  - 'audit':      POST /export_audit_logs.fcgi with all categories enabled
+   */
+  async downloadLog(conn: DeviceConnection, kind: 'diagnostic' | 'audit'): Promise<string> {
+    const proto = conn.port === 443 ? 'https' : 'http';
+    const session = await this.login(conn);
+    try {
+      if (kind === 'audit') {
+        const categories = { config: 1, api: 1, usb: 1, network: 1, time: 1, online: 1, menu: 1, boot: 1, push_server: 1 };
+        return await this.httpPostRaw(proto, conn.ip, conn.port, '/export_audit_logs.fcgi', JSON.stringify(categories), 30000, session);
+      }
+      return await this.httpPostRaw(proto, conn.ip, conn.port, '/get_ac_log.fcgi', '{}', 30000, session);
+    } finally {
+      await this.httpRequest(proto, conn.ip, conn.port, '/logout.fcgi', '{}', 5000, session).catch(() => {});
+    }
+  }
+
+  /**
    * Run the first-boot wizard steps in the exact order the device web UI uses:
    * set language → finish_init_language (posted with NO body) → accept_legal_terms
    * {country_code}. Every step must succeed — a silently-skipped step leaves the
@@ -496,6 +516,39 @@ export class ControlIdAdapter implements DeviceAdapter {
         let data = '';
         res.on('data', (chunk: string) => { data += chunk; });
         res.on('end', () => { try { resolve(JSON.parse(data)); } catch { resolve(null); } });
+      });
+      req.on('error', reject);
+      req.on('timeout', () => { req.destroy(); reject(new Error('Timeout')); });
+      req.write(body);
+      req.end();
+    });
+  }
+
+  /** POST returning the raw response body as text (for log/file downloads that
+   *  return text/plain rather than JSON). */
+  private httpPostRaw(
+    protocol: string, ip: string, port: number, path: string,
+    body: string, timeoutMs: number, session?: string
+  ): Promise<string> {
+    const fullPath = session
+      ? `${path}${path.includes('?') ? '&' : '?'}session=${encodeURIComponent(session)}`
+      : path;
+    return new Promise((resolve, reject) => {
+      const mod = protocol === 'https' ? https : http;
+      const options: https.RequestOptions = {
+        hostname: ip, port, path: fullPath, method: 'POST', timeout: timeoutMs,
+        headers: {
+          'Content-Type': 'application/json',
+          'Content-Length': Buffer.byteLength(body),
+          ...(session ? { Cookie: `session=${session}` } : {}),
+        },
+        ...(protocol === 'https' ? { agent: httpsAgent } : {}),
+      };
+      const req = mod.request(options, (res) => {
+        let data = '';
+        res.setEncoding('utf8');
+        res.on('data', (chunk: string) => { data += chunk; });
+        res.on('end', () => resolve(data));
       });
       req.on('error', reject);
       req.on('timeout', () => { req.destroy(); reject(new Error('Timeout')); });
