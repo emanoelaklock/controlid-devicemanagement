@@ -79,6 +79,25 @@ Electron 32 | React 18 | Tailwind CSS (dark) | Vite 5 | sql.js (SQLite WASM) | I
    clara: usar "Set Credentials" no device e tentar de novo.
    - UI: modal "Network Configuration" no painel do dispositivo (DHCP ↔ IP fixo),
      prefill via `devices:get-network` (lê o bloco network do system_information).
+7. **Onboarding/comissionamento remoto de fábrica** (VALIDADO ponta a ponta em
+   fw 8.7.3: reset físico → onboarding remoto → reboot → tela normal confirmada).
+   O assistente físico (idioma → país → termos → login web) tem etapas de API
+   SEPARADAS. Trocar só a senha (`change_login`) deixa a leitora presa no assistente
+   e ela **volta pro idioma após reboot**. Sequência correta (ordem da web UI):
+   1. `set_configuration {general:{language:"pt_BR"}}`
+   2. `finish_init_language.fcgi` — **POST SEM CORPO** (corpo `{}` NÃO persiste; foi o bug).
+   3. `accept_legal_terms.fcgi {country_code:"BR"}`
+   4. `change_login.fcgi {login,password}` (por último — invalida a sessão).
+   - As 3 primeiras são idempotentes (seguras de re-rodar em device já OK).
+   - `is_first_web_login.fcgi` → `{is_first_web_login:true|false}` detecta first-boot;
+     após `change_login` vira `false`, então NÃO serve para recuperar leitora presa
+     no meio → por isso existe o `finishSetup` (roda só as 3 etapas, incondicional).
+   - **IP de fábrica = `192.168.0.129` (estático)**. Após factory reset a leitora
+     volta para esse IP/sub-rede — some da rede DHCP até ser reconfigurada.
+   - A API FICA acessível durante o assistente de fabrica (dá pra comissionar remoto).
+   - Adapter: `commissionDevice` (onboarding+credencial, usado no "Set Credentials")
+     e `finishSetup` (só onboarding, botão "Finish Setup" p/ recuperar leitora presa).
+   - Reset de fábrica mantendo rede: `reset_to_factory_default.fcgi {keep_network_info:true}`.
 
 ## v2.1 — Bugs corrigidos
 

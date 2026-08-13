@@ -297,8 +297,14 @@ export function registerIpcHandlers(getWindow: () => BrowserWindow | null): void
   // Change device login (web + API credential) remotely, in batch.
   // Creates/reuses a local credential record and re-assigns each device on
   // success, so the app keeps connecting after the change.
-  ipcMain.handle('batch:change-credentials', async (_e, { deviceIds, newUsername, newPassword }: any) => {
+  ipcMain.handle('batch:change-credentials', async (_e, { deviceIds, newUsername, newPassword, country }: any) => {
     if (!newUsername || !newPassword) throw new Error('Username and password are required');
+
+    // Country/language are only used for devices still in first-boot state, where
+    // changing the login also requires completing the on-screen setup wizard.
+    const countryCode = String(country || 'BR').toUpperCase();
+    const LANG_BY_COUNTRY: Record<string, string> = { BR: 'pt_BR', PT: 'pt_BR', US: 'en_US', GB: 'en_US', ES: 'spa_SPA', FR: 'fr_FR', DE: 'de_DE' };
+    const language = LANG_BY_COUNTRY[countryCode] || 'pt_BR';
 
     // Reuse a credential with the same username+password if it exists, else create one
     let credential = query('SELECT * FROM credentials').find((c: any) => {
@@ -315,15 +321,24 @@ export function registerIpcHandlers(getWindow: () => BrowserWindow | null): void
 
     return jobService.createJob('batch_credential', `Set credentials on ${deviceIds.length} devices`, deviceIds,
       async (conn, device) => {
-        const adapter = adapterRegistry.get(device.manufacturer);
+        const adapter = adapterRegistry.get(device.manufacturer) as any;
         if (!adapter) throw new Error('No adapter');
-        const ok = await adapter.changePassword(conn, newUsername, newPassword);
-        if (!ok) throw new Error('Device rejected credential change (check current credentials)');
+        // commissionDevice completes first-boot onboarding (language/legal terms)
+        // before changing the login; on an already-set-up device it's just the
+        // credential change. Fall back to changePassword for other adapters.
+        const result = adapter.commissionDevice
+          ? await adapter.commissionDevice(conn, { newUsername, newPassword, language, countryCode })
+          : { ok: await adapter.changePassword(conn, newUsername, newPassword), onboarded: false };
+        if (!result.ok) throw new Error('Device rejected credential change (check current credentials)');
         run(`UPDATE devices SET credential_id=?, updated_at='${nowLocal()}' WHERE id=?`, [credentialId, device.id]);
         run(`INSERT INTO audit_logs (id, action, category, device_id, device_name, details, severity, created_at) VALUES (?,?,?,?,?,?,?,?)`,
           [uuid(), 'credentials_changed', 'credential', device.id, device.name,
-           `Login changed to "${newUsername}" and verified`, 'warning', nowLocal()]);
-        return `Credentials changed to "${newUsername}" and verified`;
+           result.onboarded
+             ? `Initial setup completed (${language}/${countryCode}) and login changed to "${newUsername}"`
+             : `Login changed to "${newUsername}" and verified`, 'warning', nowLocal()]);
+        return result.onboarded
+          ? `Set up (${language}/${countryCode}) + credentials "${newUsername}"`
+          : `Credentials changed to "${newUsername}" and verified`;
       }, getWindow());
   });
 
@@ -637,6 +652,27 @@ export function registerIpcHandlers(getWindow: () => BrowserWindow | null): void
   });
 
   // ─── Network Configuration ──────────────────────────────────────
+
+  ipcMain.handle('devices:finish-setup', async (_e, { id, country }: any) => {
+    const device = queryOne(`SELECT d.*, c.username, c.password as cred_password
+      FROM devices d LEFT JOIN credentials c ON d.credential_id = c.id WHERE d.id = ?`, [id]);
+    if (!device) throw new Error('Device not found');
+    const adapter = adapterRegistry.get(device.manufacturer) as any;
+    if (!adapter?.finishSetup) throw new Error('Adapter does not support setup completion');
+
+    const countryCode = String(country || 'BR').toUpperCase();
+    const LANG_BY_COUNTRY: Record<string, string> = { BR: 'pt_BR', PT: 'pt_BR', US: 'en_US', GB: 'en_US', ES: 'spa_SPA', FR: 'fr_FR', DE: 'de_DE' };
+    const language = LANG_BY_COUNTRY[countryCode] || 'pt_BR';
+
+    const conn: DeviceConnection = { ip: device.ip_address, port: device.port,
+      username: device.username || 'admin', password: device.cred_password ? decrypt(device.cred_password) : '' };
+    await adapter.finishSetup(conn, { language, countryCode });
+
+    run(`INSERT INTO audit_logs (id, action, category, device_id, device_name, details, severity, created_at) VALUES (?,?,?,?,?,?,?,?)`,
+      [uuid(), 'setup_completed', 'device', id, device.name,
+       `Initial setup completed remotely (${language}/${countryCode})`, 'info', nowLocal()]);
+    return { success: true };
+  });
 
   ipcMain.handle('devices:get-network', async (_e, id: string) => {
     const device = queryOne(`SELECT d.*, c.username, c.password as cred_password

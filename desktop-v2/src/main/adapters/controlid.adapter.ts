@@ -259,6 +259,92 @@ export class ControlIdAdapter implements DeviceAdapter {
     } catch { return false; }
   }
 
+  /**
+   * Commission a device. For a factory unit still in first-boot state, complete
+   * the on-screen setup wizard (language → finish_init_language → accept_legal_terms)
+   * and then change the login — the exact sequence the device's own web UI runs on
+   * first login (verified against fw 8.7.3). Changing the login alone (what the old
+   * flow did) leaves the device stuck on the physical wizard because the
+   * language/legal-terms steps are separate. For an already-set-up device this just
+   * changes the credentials, so it is safe to call on any device.
+   * Returns whether the first-boot onboarding steps were actually applied.
+   */
+  async commissionDevice(
+    conn: DeviceConnection,
+    opts: { newUsername: string; newPassword: string; language?: string; countryCode?: string }
+  ): Promise<{ ok: boolean; onboarded: boolean }> {
+    const language = opts.language || 'pt_BR';
+    const countryCode = (opts.countryCode || 'BR').toUpperCase();
+    const proto = conn.port === 443 ? 'https' : 'http';
+    const { session, message } = await this.loginFull(conn);
+
+    // Detect first-boot state: prefer the explicit endpoint, fall back to the
+    // login message ("First Web Login. Please Change the Credentials").
+    let firstBoot = /first web login/i.test(message || '');
+    try {
+      const r = await this.httpRequest(proto, conn.ip, conn.port, '/is_first_web_login.fcgi', '{}', 8000, session);
+      if (r && typeof r.is_first_web_login === 'boolean') firstBoot = r.is_first_web_login;
+    } catch { /* keep the message-based detection */ }
+
+    let onboarded = false;
+    if (firstBoot) {
+      await this.applyFirstBootSetup(proto, conn, session, language, countryCode);
+      onboarded = true;
+    }
+
+    // Change credentials last — this step invalidates the current session.
+    const res = await this.httpRequest(proto, conn.ip, conn.port, '/change_login.fcgi',
+      JSON.stringify({ login: opts.newUsername, password: opts.newPassword }), 10000, session);
+    if (res?.error) {
+      throw new Error(`change_login failed: ${typeof res.error === 'string' ? res.error : JSON.stringify(res.error)}`);
+    }
+
+    // Verify the new credentials work.
+    const verified = await this.authenticate(conn.ip, conn.port, opts.newUsername, opts.newPassword);
+    return { ok: verified !== null, onboarded };
+  }
+
+  /**
+   * Force-complete the on-screen setup wizard (language + legal terms) on a device
+   * that is stuck part-way through it — e.g. a unit whose password was already
+   * changed (so is_first_web_login is already false) but that still boots into the
+   * wizard. Runs the same steps as commissionDevice minus the credential change,
+   * unconditionally. The steps are idempotent (verified against fw 8.7.3), so this
+   * is harmless to run on an already-configured device.
+   */
+  async finishSetup(conn: DeviceConnection, opts: { language?: string; countryCode?: string }): Promise<boolean> {
+    const language = opts.language || 'pt_BR';
+    const countryCode = (opts.countryCode || 'BR').toUpperCase();
+    const proto = conn.port === 443 ? 'https' : 'http';
+    const session = await this.login(conn);
+    try {
+      await this.applyFirstBootSetup(proto, conn, session, language, countryCode);
+    } finally {
+      await this.httpRequest(proto, conn.ip, conn.port, '/logout.fcgi', '{}', 5000, session).catch(() => {});
+    }
+    return true;
+  }
+
+  /**
+   * Run the first-boot wizard steps in the exact order the device web UI uses:
+   * set language → finish_init_language (posted with NO body) → accept_legal_terms
+   * {country_code}. Every step must succeed — a silently-skipped step leaves the
+   * device booting back into the wizard. Verified end-to-end against fw 8.7.3.
+   */
+  private async applyFirstBootSetup(
+    proto: string, conn: DeviceConnection, session: string, language: string, countryCode: string
+  ): Promise<void> {
+    const fail = (ep: string, r: any) => {
+      if (r?.error) throw new Error(`${ep} failed: ${typeof r.error === 'string' ? r.error : JSON.stringify(r.error)}`);
+    };
+    fail('set language', await this.httpRequest(proto, conn.ip, conn.port, '/set_configuration.fcgi',
+      JSON.stringify({ general: { language } }), 10000, session));
+    fail('finish_init_language', await this.httpRequest(proto, conn.ip, conn.port, '/finish_init_language.fcgi',
+      '', 10000, session));
+    fail('accept_legal_terms', await this.httpRequest(proto, conn.ip, conn.port, '/accept_legal_terms.fcgi',
+      JSON.stringify({ country_code: countryCode }), 10000, session));
+  }
+
   // ─── Private helpers ────────────────────────────────────────────
 
   private async login(conn: DeviceConnection): Promise<string> {

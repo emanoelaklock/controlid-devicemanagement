@@ -175,8 +175,13 @@ export default function DevicesPage() {
     if (!username) return;
     const password = await ipc.prompt('Set Credentials', `New password for user "${username}":`);
     if (!password) return;
-    if (!(await ipc.confirm(`Change login on ${selected.size} device(s) to "${username}"? The app will re-link them to the new credential automatically.`))) return;
-    await ipc.batchChangeCredentials(Array.from(selected), username, password);
+    // Country only matters for factory devices still in first-boot: setting the
+    // login also completes the on-screen wizard (language + legal terms).
+    const country = await ipc.prompt('Set Credentials',
+      'Country code — only used to finish initial setup on factory (first-boot) devices:', 'BR');
+    if (country === null) return;
+    if (!(await ipc.confirm(`Change login on ${selected.size} device(s) to "${username}"? Factory devices will also have their initial setup completed. The app re-links them to the new credential automatically.`))) return;
+    await ipc.batchChangeCredentials(Array.from(selected), username, password, country || 'BR');
     toast('Credential change started — see Tasks page for results', 'info');
     setSelected(new Set());
   };
@@ -494,6 +499,18 @@ export default function DevicesPage() {
             <button onClick={openNetworkModal} disabled={!detail.credential_id}
               className="w-full px-3 py-2 bg-cyan-700 text-white text-xs rounded-lg hover:bg-cyan-600 disabled:opacity-40 disabled:cursor-not-allowed">
               Network (DHCP / Static IP)</button>
+            <button onClick={async () => {
+              const country = await ipc.prompt('Finish initial setup',
+                'Country code (the on-screen language is derived from it):', 'BR');
+              if (country === null) return;
+              if (!(await ipc.confirm('Complete the initial setup wizard (language + legal terms) on this device remotely? Use this if the reader is stuck on the on-screen setup wizard (language/country/terms).'))) return;
+              try {
+                await ipc.finishSetup(detail.id, country || 'BR');
+                toast('Setup completed. If the screen still shows the wizard, reboot the device to apply.', 'success');
+              } catch (e: any) { toast(`Finish setup failed: ${e.message || e}`, 'error'); }
+            }} disabled={!detail.credential_id}
+              className="w-full px-3 py-2 bg-indigo-700 text-white text-xs rounded-lg hover:bg-indigo-600 disabled:opacity-40 disabled:cursor-not-allowed">
+              Finish Setup (stuck on wizard)</button>
             <button onClick={async () => {
               if (!(await ipc.confirm('FACTORY RESET: This will erase all data on the device. Keep network settings?'))) return;
               const keepNet = await ipc.confirm('Preserve network configuration (IP, DHCP)?');

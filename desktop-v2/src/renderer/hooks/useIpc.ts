@@ -24,13 +24,14 @@ export const ipc = {
   factoryReset: (id: string, keepNetwork: boolean) => window.api.invoke('devices:factory-reset', { id, keepNetwork }),
   setNetwork: (id: string, network: any) => window.api.invoke('devices:set-network', { id, network }),
   getNetwork: (id: string) => window.api.invoke('devices:get-network', id),
+  finishSetup: (id: string, country?: string) => window.api.invoke('devices:finish-setup', { id, country }),
 
   // Batch
   batchReboot: (ids: string[]) => window.api.invoke('batch:reboot', ids),
   batchTestConnection: (ids: string[]) => window.api.invoke('batch:test-connection', ids),
   batchBackup: (ids: string[]) => window.api.invoke('batch:backup', ids),
-  batchChangeCredentials: (deviceIds: string[], newUsername: string, newPassword: string) =>
-    window.api.invoke('batch:change-credentials', { deviceIds, newUsername, newPassword }),
+  batchChangeCredentials: (deviceIds: string[], newUsername: string, newPassword: string, country?: string) =>
+    window.api.invoke('batch:change-credentials', { deviceIds, newUsername, newPassword, country }),
 
   // Discovery
   startScan: (request: any) => window.api.invoke('discovery:scan', request),
