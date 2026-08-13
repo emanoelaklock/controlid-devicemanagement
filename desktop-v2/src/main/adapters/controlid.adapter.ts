@@ -276,7 +276,10 @@ export class ControlIdAdapter implements DeviceAdapter {
     const language = opts.language || 'pt_BR';
     const countryCode = (opts.countryCode || 'BR').toUpperCase();
     const proto = conn.port === 443 ? 'https' : 'http';
-    const { session, message } = await this.loginFull(conn);
+    // Use the stored credential, but fall back to factory admin/admin if it fails
+    // — a factory-reset device reverts to admin/admin, and without this the app
+    // could never recover it (it would keep trying the stale stored password).
+    const { session, message } = await this.loginWithFactoryFallback(conn);
 
     // Detect first-boot state: prefer the explicit endpoint, fall back to the
     // login message ("First Web Login. Please Change the Credentials").
@@ -316,7 +319,7 @@ export class ControlIdAdapter implements DeviceAdapter {
     const language = opts.language || 'pt_BR';
     const countryCode = (opts.countryCode || 'BR').toUpperCase();
     const proto = conn.port === 443 ? 'https' : 'http';
-    const session = await this.login(conn);
+    const { session } = await this.loginWithFactoryFallback(conn);
     try {
       await this.applyFirstBootSetup(proto, conn, session, language, countryCode);
     } finally {
@@ -359,14 +362,21 @@ export class ControlIdAdapter implements DeviceAdapter {
   private async loginFull(conn: DeviceConnection): Promise<{ session: string; message?: string }> {
     const proto = conn.port === 443 ? 'https' : 'http';
 
-    // Try .fcgi login first
+    // Try the legacy .fcgi API first
     try {
       const res = await this.httpRequest(proto, conn.ip, conn.port, '/login.fcgi',
         JSON.stringify({ login: conn.username, password: conn.password }), 10000);
       if (res?.session) return { session: res.session, message: res.message };
-    } catch { /* try next */ }
+      // An explicit rejection means this IS a .fcgi device, just with wrong
+      // credentials — stop here. Probing /api/login only fetches the SPA HTML and
+      // stresses the device's tiny web server (it drops connections under a burst).
+      if (res?.error) throw new Error(`Authentication failed for ${conn.ip}:${conn.port}`);
+    } catch (e) {
+      if (e instanceof Error && e.message.startsWith('Authentication failed')) throw e;
+      /* connection/parse error — fall through to the newer API */
+    }
 
-    // Try new API login
+    // Try the newer REST API (only when the legacy endpoint didn't answer at all)
     try {
       const res = await this.httpRequest(proto, conn.ip, conn.port, '/api/login',
         JSON.stringify({ login: conn.username, password: conn.password }), 10000);
@@ -376,6 +386,35 @@ export class ControlIdAdapter implements DeviceAdapter {
     } catch { /* fallthrough */ }
 
     throw new Error(`Authentication failed for ${conn.ip}:${conn.port}`);
+  }
+
+  private delay(ms: number): Promise<void> {
+    return new Promise(resolve => setTimeout(resolve, ms));
+  }
+
+  /**
+   * Login with the given credential; if it fails, retry once with the factory
+   * default admin/admin. A factory-reset device reverts to admin/admin, so this
+   * lets commissioning/setup recover a reset device without the operator having
+   * to first fix the stored credential by hand.
+   */
+  private async loginWithFactoryFallback(conn: DeviceConnection): Promise<{ session: string; message?: string; usedFactory: boolean }> {
+    try {
+      return { ...(await this.loginFull(conn)), usedFactory: false };
+    } catch (e) {
+      if (conn.username === 'admin' && conn.password === 'admin') throw e; // already factory creds
+      // The failed attempt can briefly stress the device's tiny web server (it drops
+      // connections under rapid requests), so pause before retrying and give the
+      // factory login a few tries to ride out a transient reset.
+      const factory = { ...conn, username: 'admin', password: 'admin' };
+      let lastErr: unknown;
+      for (let attempt = 0; attempt < 3; attempt++) {
+        await this.delay(1500);
+        try { return { ...(await this.loginFull(factory)), usedFactory: true }; }
+        catch (err) { lastErr = err; }
+      }
+      throw lastErr;
+    }
   }
 
   private buildDiscovered(ip: string, port: number, proto: string, data: any, elapsed: number): DiscoveredDevice {
