@@ -574,10 +574,15 @@ export function registerIpcHandlers(getWindow: () => BrowserWindow | null): void
     return query(`SELECT * FROM connection_history WHERE device_id = ? AND timestamp >= datetime('now', '-${d} days') ORDER BY timestamp DESC`, [deviceId]);
   });
 
-  ipcMain.handle('history:all-recent', (_e, { limit }: any) => {
-    return query(`SELECT ch.*, d.name as device_name, d.ip_address
+  ipcMain.handle('history:all-recent', (_e, { limit, event }: any) => {
+    const params: any[] = [];
+    let where = '';
+    if (event === 'online' || event === 'offline') { where = 'WHERE ch.event = ?'; params.push(event); }
+    params.push(limit || 50);
+    return query(`SELECT ch.*, d.name as device_name, d.ip_address, g.name as group_name
       FROM connection_history ch JOIN devices d ON ch.device_id = d.id
-      ORDER BY ch.timestamp DESC LIMIT ?`, [limit || 50]);
+      LEFT JOIN device_groups g ON d.group_id = g.id
+      ${where} ORDER BY ch.timestamp DESC LIMIT ?`, params);
   });
 
   // ─── Connection health (per-device drops + 7d availability) ─────
@@ -1009,7 +1014,7 @@ export function registerIpcHandlers(getWindow: () => BrowserWindow | null): void
   // each device is offline for several minutes while it runs).
   ipcMain.handle('firmware:repair', async (_e, { deviceIds, factory }: { deviceIds: string[]; factory?: boolean }) => {
     return jobService.createJob('firmware_upgrade',
-      `${factory ? 'Factory reinstall' : 'Repair'} firmware on ${deviceIds.length} device(s)`, deviceIds,
+      `${factory ? 'Factory reinstall' : 'Update'} firmware on ${deviceIds.length} device(s)`, deviceIds,
       async (conn, device) => {
         const adapter = adapterRegistry.get(device.manufacturer);
         if (!adapter?.repairFirmware) throw new Error('Adapter does not support firmware repair');

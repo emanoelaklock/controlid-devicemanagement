@@ -1,3 +1,5 @@
+import { appConfirm, appPrompt } from '../components/Dialogs';
+
 /** Type-safe wrapper around the preload API */
 declare global {
   interface Window {
@@ -81,7 +83,7 @@ export const ipc = {
 
   // Connection History
   deviceHistory: (deviceId: string, days?: number) => window.api.invoke('history:device', { deviceId, days }),
-  recentHistory: (limit?: number) => window.api.invoke('history:all-recent', { limit }),
+  recentHistory: (limit?: number, event?: 'online' | 'offline') => window.api.invoke('history:all-recent', { limit, event }),
   devicesHealth: (): Promise<Record<string, { drops_24h: number; drops_7d: number; availability_7d: number; unstable: boolean }>> =>
     window.api.invoke('devices:health'),
 
@@ -114,11 +116,13 @@ export const ipc = {
   exportDevicesCsv: () => window.api.invoke('export:devices-csv'),
   exportAuditCsv: () => window.api.invoke('export:audit-csv'),
 
-  // Dialogs (prompt/confirm don't work in Electron with contextIsolation)
+  // Dialogs — in-app themed modals (see components/Dialogs.tsx). The native
+  // Electron message boxes are no longer used; window.prompt/confirm don't
+  // work with contextIsolation.
   prompt: (title: string, message: string, defaultValue?: string): Promise<string | null> =>
-    window.api.invoke('dialog:prompt', { title, message, defaultValue }),
+    appPrompt(title, message, defaultValue ?? ''),
   confirm: (message: string): Promise<boolean> =>
-    window.api.invoke('dialog:confirm', message),
+    appConfirm(message),
 
   // Events - must be lazy to ensure window.api is available
   on: (channel: string, callback: (...args: any[]) => void) => {

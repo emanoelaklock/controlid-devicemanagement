@@ -6,11 +6,12 @@ import { Badge, BadgeTone, Button, Card, Modal, ModalTitle, StateBlock, TextInpu
 
 export type DeviceHealth = { drops_24h: number; drops_7d: number; availability_7d: number; unstable: boolean };
 
-export function statusInfo(device: any, health?: DeviceHealth): { label: string; tone: BadgeTone } {
-  if (device.status === 'online') {
-    return health?.unstable ? { label: 'Unstable', tone: 'warn' } : { label: 'Online', tone: 'exec' };
-  }
-  return { label: 'Offline', tone: 'pend' };
+// Devices and Device detail show only Online/Offline; instability (3+ drops
+// in 24h) is surfaced on the Connection health page instead.
+export function statusInfo(device: any): { label: string; tone: BadgeTone } {
+  return device.status === 'online'
+    ? { label: 'Online', tone: 'exec' }
+    : { label: 'Offline', tone: 'pend' };
 }
 
 const GRID_COLUMNS = '44px 122px minmax(210px,1.4fr) 148px 105px 138px 96px 172px 60px 118px minmax(160px,1fr) 30px';
@@ -120,9 +121,9 @@ export default function DevicesPage({ onOpenDevice }: { onOpenDevice: (id: strin
   };
 
   const handleBatchRepairFirmware = async () => {
-    if (!(await ipc.confirm(`Reinstall firmware on ${selected.size} device(s) via recovery mode? Each device downloads the firmware from Control iD (they need INTERNET access). Devices are processed ONE AT A TIME and each stays offline for several minutes. Settings and users are kept.`))) return;
+    if (!(await ipc.confirm(`Update the firmware on ${selected.size} device(s) via recovery mode? Each device downloads the firmware from Control iD (they need INTERNET access). Devices are processed ONE AT A TIME and each stays offline for several minutes. Settings and users are kept.`))) return;
     await ipc.firmwareRepair(Array.from(selected));
-    toast('Firmware repair job started — see Tasks page for progress.', 'info');
+    toast('Firmware update job started — see Tasks page for progress.', 'info');
     setSelected(new Set());
   };
 
@@ -227,7 +228,7 @@ export default function DevicesPage({ onOpenDevice }: { onOpenDevice: (id: strin
           <Button variant="ghost" size="sm" onClick={() => setHardenModal(true)}>Harden</Button>
           <Button variant="ghost" size="sm" onClick={handleBatchAudit}>Audit</Button>
           <Button variant="warn-outline" size="sm" onClick={handleBatchReboot}>Reboot</Button>
-          <Button variant="danger" size="sm" onClick={handleBatchRepairFirmware}>Repair firmware</Button>
+          <Button variant="danger" size="sm" onClick={handleBatchRepairFirmware}>Update firmware</Button>
         </div>
       )}
 
@@ -257,7 +258,7 @@ export default function DevicesPage({ onOpenDevice }: { onOpenDevice: (id: strin
 
             {filtered.map(d => {
               const h = health[d.id];
-              const st = statusInfo(d, h);
+              const st = statusInfo(d);
               return (
                 <div key={d.id} className="sr-row" onClick={() => onOpenDevice(d.id)}
                   style={{ display: 'grid', gridTemplateColumns: GRID_COLUMNS, alignItems: 'center' }}>

@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import Sidebar from './components/Sidebar';
 import Topbar from './components/Topbar';
 import { ToastContainer } from './components/Toast';
+import { DialogHost } from './components/Dialogs';
 import DashboardPage from './pages/DashboardPage';
 import DevicesPage from './pages/DevicesPage';
 import DeviceDetailPage from './pages/DeviceDetailPage';
@@ -66,6 +67,7 @@ export default function App() {
   return (
     <div className="flex h-screen overflow-hidden" style={{ background: 'var(--surface)', color: 'var(--text)' }}>
       <ToastContainer />
+      <DialogHost />
       <Sidebar currentPage={page} onNavigate={setPage} />
       <div className="flex-1 min-w-0 flex flex-col">
         <Topbar title={PAGE_TITLES[page]} theme={theme}

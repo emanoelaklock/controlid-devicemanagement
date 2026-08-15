@@ -61,11 +61,23 @@ export default function DeviceDetailPage({ deviceId, onBack }: { deviceId: strin
     return () => { clearInterval(interval); unsub?.(); };
   }, [load]);
 
-  // Netmask/gateway live only on the device — fetched best-effort when reachable.
+  // Netmask/gateway live only on the device — keep retrying every 10 s until
+  // the device answers (it may be offline or still booting when the page opens).
+  const [netNonce, setNetNonce] = useState(0);
   useEffect(() => {
+    let stopped = false;
     setLiveNet(null);
-    ipc.getNetwork(deviceId).then(setLiveNet).catch(() => {});
-  }, [deviceId]);
+    const attempt = async () => {
+      if (stopped) return;
+      try {
+        const n = await ipc.getNetwork(deviceId);
+        if (n && !stopped) { setLiveNet(n); return; }
+      } catch { /* unreachable — retry */ }
+      if (!stopped) setTimeout(attempt, 10000);
+    };
+    attempt();
+    return () => { stopped = true; };
+  }, [deviceId, netNonce]);
 
   if (!device) {
     return (
@@ -75,7 +87,7 @@ export default function DeviceDetailPage({ deviceId, onBack }: { deviceId: strin
     );
   }
 
-  const st = statusInfo(device, health ?? undefined);
+  const st = statusInfo(device);
   const groupName = device.group_name || 'Ungrouped';
   const noCred = !device.credential_id;
   const openUrl = () => window.api.invoke('shell:open-url', `http${device.https_enabled ? 's' : ''}://${device.ip_address}:${device.port}`);
@@ -167,6 +179,7 @@ export default function DeviceDetailPage({ deviceId, onBack }: { deviceId: strin
       toast(f.dhcp ? 'DHCP enabled. Waiting for the device to reconnect...' : `Static IP ${f.ip} applied. Reconnecting...`, 'success');
       setNetModal(false);
       setTimeout(load, 4000);
+      setTimeout(() => setNetNonce(n => n + 1), 6000);
     } catch (e: any) { toast(`Network change failed: ${e.message || e}`, 'error'); }
     finally { setNetSaving(false); }
   };
@@ -233,11 +246,11 @@ export default function DeviceDetailPage({ deviceId, onBack }: { deviceId: strin
   };
 
   const handleRepairFirmware = async () => {
-    if (!(await ipc.confirm('Reinstall the firmware via recovery mode? The device downloads the firmware from Control iD (it needs INTERNET access), reflashes itself and reboots — offline for several minutes. Settings and users are KEPT. Use this for corrupted firmware or boot loops.'))) return;
+    if (!(await ipc.confirm('Update the firmware via recovery mode? The device downloads the firmware from Control iD (it needs INTERNET access), reflashes itself and reboots — offline for several minutes. Settings and users are KEPT. Also use this to repair corrupted firmware or boot loops.'))) return;
     try {
       await ipc.firmwareRepair([deviceId]);
-      toast('Firmware repair started — follow progress on the Tasks page.', 'info');
-    } catch (e: any) { toast(`Could not start repair: ${e.message || e}`, 'error'); }
+      toast('Firmware update started — follow progress on the Tasks page.', 'info');
+    } catch (e: any) { toast(`Could not start the update: ${e.message || e}`, 'error'); }
   };
 
   const handleEnterRecovery = async () => {
@@ -311,6 +324,7 @@ export default function DeviceDetailPage({ deviceId, onBack }: { deviceId: strin
                 </h2>
                 <Badge tone={st.tone} dot>{st.label}</Badge>
                 {device.factory_credentials === 1 && <Badge tone="pend">Factory credentials</Badge>}
+                <Button variant="ghost" size="sm" style={{ padding: '4px 10px' }} onClick={handleRename}>Rename</Button>
               </div>
               <div style={{ fontSize: 12.5, color: 'var(--text-muted)', marginTop: 4, fontVariantNumeric: 'tabular-nums' }}>
                 {device.model || 'Unknown model'} · <a href="#" onClick={e => { e.preventDefault(); openUrl(); }}>{device.ip_address}:{device.port}</a> · {groupName} · last heartbeat {device.last_heartbeat ? fmtDate(device.last_heartbeat) : 'never'}
@@ -392,12 +406,11 @@ export default function DeviceDetailPage({ deviceId, onBack }: { deviceId: strin
               <Button variant="ghost" size="sm" disabled={noCred} onClick={handleFinishSetup}>Finish setup (wizard)</Button>
               <Button variant="ghost" size="sm" disabled={noCred} onClick={() => handleLogs('Diagnostic logs', 'diagnostic')}>Diagnostic logs</Button>
               <Button variant="ghost" size="sm" disabled={noCred} onClick={() => handleLogs('Audit logs', 'audit')}>Audit logs</Button>
-              <Button variant="ghost" size="sm" onClick={handleRename}>Rename</Button>
               <Button variant="ghost" size="sm" onClick={handleEditNotes}>Edit notes</Button>
+              <Button variant="warn-outline" size="sm" disabled={noCred} onClick={handleReboot}>Reboot</Button>
             </ActionRow>
             <ActionRow label="Recovery">
-              <Button variant="warn-outline" size="sm" disabled={noCred} onClick={handleReboot}>Reboot</Button>
-              <Button variant="warn-outline" size="sm" disabled={noCred} onClick={handleRepairFirmware}>Repair firmware (recovery)</Button>
+              <Button variant="warn-outline" size="sm" disabled={noCred} onClick={handleRepairFirmware}>Update firmware</Button>
               <Button variant="ghost" size="sm" disabled={noCred} onClick={handleEnterRecovery}>Enter recovery</Button>
               <Button variant="ghost" size="sm" onClick={handleExitRecovery}>Exit recovery</Button>
             </ActionRow>
