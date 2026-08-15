@@ -20,7 +20,7 @@ contextBridge.exposeInMainWorld('api', {
       'jobs:list', 'jobs:get', 'jobs:cancel',
       'audit:list',
       'groups:list', 'groups:create', 'groups:delete',
-      'history:device', 'history:all-recent',
+      'history:device', 'history:all-recent', 'devices:health',
       'dashboard:stats',
       'config:backup', 'config:backups', 'config:restore', 'config:get-live', 'config:apply',
       'templates:list', 'templates:get', 'templates:create', 'templates:update', 'templates:delete',

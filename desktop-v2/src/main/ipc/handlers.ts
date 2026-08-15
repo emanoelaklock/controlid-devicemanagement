@@ -580,6 +580,84 @@ export function registerIpcHandlers(getWindow: () => BrowserWindow | null): void
       ORDER BY ch.timestamp DESC LIMIT ?`, [limit || 50]);
   });
 
+  // ─── Connection health (per-device drops + 7d availability) ─────
+
+  ipcMain.handle('devices:health', () => {
+    // Timestamps in connection_history are local time ("YYYY-MM-DD HH:MM:SS").
+    const parseLocal = (s: string): number => {
+      const p = s.replace('T', ' ').split(/[- :]/).map(Number);
+      return new Date(p[0], p[1] - 1, p[2], p[3] || 0, p[4] || 0, p[5] || 0).getTime();
+    };
+    const now = Date.now();
+    const DAY = 24 * 60 * 60 * 1000;
+    const winStart = now - 7 * DAY;
+
+    const devices = query(`SELECT id, status, created_at, last_heartbeat FROM devices`);
+    const events = query(`SELECT device_id, event, timestamp FROM connection_history
+      WHERE timestamp >= datetime('now','localtime','-7 days') ORDER BY timestamp ASC`);
+    // State each device was in when the 7-day window opened (SQLite picks the
+    // row that matches MAX(timestamp) for the bare "event" column).
+    const prior = query(`SELECT device_id, event, MAX(timestamp) as timestamp
+      FROM connection_history WHERE timestamp < datetime('now','localtime','-7 days')
+      GROUP BY device_id`);
+
+    const byDevice = new Map<string, any[]>();
+    for (const e of events) {
+      if (!byDevice.has(e.device_id)) byDevice.set(e.device_id, []);
+      byDevice.get(e.device_id)!.push(e);
+    }
+    const priorState = new Map<string, string>();
+    for (const p of prior) priorState.set(p.device_id, p.event);
+
+    const health: Record<string, any> = {};
+    for (const d of devices) {
+      const evs = byDevice.get(d.id) || [];
+      // A device registered mid-window is only measured from its creation.
+      const created = d.created_at ? parseLocal(d.created_at) : winStart;
+      const start = Math.max(winStart, Math.min(created, now));
+      const span = Math.max(now - start, 1);
+
+      let state: string;
+      if (priorState.has(d.id)) state = priorState.get(d.id)!;
+      else if (evs.length) state = evs[0].event === 'online' ? 'offline' : 'online';
+      else state = d.status === 'online' ? 'online' : 'offline';
+
+      let onlineMs = 0;
+      let cursor = start;
+      let drops24 = 0, drops7 = 0;
+      for (const e of evs) {
+        const t = Math.min(Math.max(parseLocal(e.timestamp), start), now);
+        if (state === 'online') onlineMs += t - cursor;
+        cursor = t;
+        state = e.event;
+        if (e.event === 'offline') {
+          drops7++;
+          if (t >= now - DAY) drops24++;
+        }
+      }
+      if (state === 'online') {
+        if (d.status === 'online') {
+          onlineMs += now - cursor;
+        } else {
+          // The device is offline but no 'offline' event was recorded (the app
+          // was closed when it dropped) — count it online only up to the last
+          // heartbeat we actually saw.
+          const lastHb = d.last_heartbeat ? parseLocal(d.last_heartbeat) : cursor;
+          onlineMs += Math.max(0, Math.min(lastHb, now) - cursor);
+        }
+      }
+
+      const availability = Math.max(0, Math.min(100, (onlineMs / span) * 100));
+      health[d.id] = {
+        drops_24h: drops24,
+        drops_7d: drops7,
+        availability_7d: Math.round(availability * 10) / 10,
+        unstable: d.status === 'online' && drops24 >= 3,
+      };
+    }
+    return health;
+  });
+
   // ─── Dashboard ──────────────────────────────────────────────────
 
   ipcMain.handle('dashboard:stats', () => {

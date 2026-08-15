@@ -82,6 +82,8 @@ export const ipc = {
   // Connection History
   deviceHistory: (deviceId: string, days?: number) => window.api.invoke('history:device', { deviceId, days }),
   recentHistory: (limit?: number) => window.api.invoke('history:all-recent', { limit }),
+  devicesHealth: (): Promise<Record<string, { drops_24h: number; drops_7d: number; availability_7d: number; unstable: boolean }>> =>
+    window.api.invoke('devices:health'),
 
   // Dashboard
   getStats: () => window.api.invoke('dashboard:stats'),
