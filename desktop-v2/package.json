@@ -1,6 +1,6 @@
 {
   "name": "controlid-device-manager",
-  "version": "2.2.0",
+  "version": "2.2.1",
   "description": "Control iD Device Manager - Enterprise Desktop Application",
   "main": "dist/main/index.js",
   "author": "Control iD",
