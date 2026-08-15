@@ -11,6 +11,7 @@ Gerenciador de dispositivos **Control iD** (iDFace Max, iDAcesso, etc), inspirad
 **Diretório:** `desktop-v2/`
 **Versão:** 2.0.0
 **API docs:** `./controlid_access_api_docs.md`
+**Roteiro de teste (validação em leitora real):** [`desktop-v2/TESTING.md`](./desktop-v2/TESTING.md) — passo a passo v2.2 usando os scripts de `desktop-v2/tools/` como observadores. **As features v2.2 ainda NÃO foram testadas em hardware real — seguir este roteiro é o próximo passo.**
 
 ## Stack
 
