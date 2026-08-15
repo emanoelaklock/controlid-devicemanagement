@@ -348,6 +348,147 @@ export class ControlIdAdapter implements DeviceAdapter {
     }
   }
 
+  // ─── Firmware repair via Web Recovery ───────────────────────────
+  // The public API has no endpoint to upload a firmware binary. What exists is:
+  //  - POST /reboot_recovery.fcgi (official docs, empty body) → device reboots
+  //    into the Web Recovery system, and
+  //  - the recovery web server itself (plain HTTP on port 80, page title
+  //    "iDFace Max Recovery"), which exposes shell actions via GET:
+  //      /cgi/run_update.sh          reapply the stored firmware, KEEPS config
+  //      /cgi/run_factory_update.sh  reinstall and ERASE all config/users
+  //      /cgi/reboot_normal.sh       boot back into the normal firmware
+  //      /cgi/reboot_recovery.sh     reboot staying in recovery ("hold")
+  //      /cgi/read_status.sh         progress text, ends with "FIM:"/"FINISH:"
+  // Verified against a real iDFace Max (see desktop-v2/tools/recovery-control.ps1).
+
+  /** Whether the recovery web server is answering at this IP (no auth needed).
+   *  Recovery always runs plain HTTP on port 80, regardless of the normal
+   *  firmware's SSL/port settings. */
+  async isInRecovery(ip: string): Promise<boolean> {
+    try {
+      const html = await this.httpGetRaw('http', ip, 80, '/', 6000);
+      // Match the recovery page specifically (title "iDFace Max Recovery",
+      // heading "Web Recovery") — a bare /recovery/i could false-positive on
+      // text inside the normal firmware's SPA.
+      return /<title>[^<]*recovery[^<]*<\/title>|web recovery/i.test(html || '');
+    } catch { return false; }
+  }
+
+  /** Reboot the device into Web Recovery mode. If it is already in recovery,
+   *  re-issue the recovery-mode reboot so it stays there instead of cycling. */
+  async enterRecovery(conn: DeviceConnection): Promise<void> {
+    if (await this.isInRecovery(conn.ip)) {
+      await this.recoveryCommand(conn.ip, 'reboot_recovery');
+      return;
+    }
+    const session = await this.login(conn);
+    const proto = conn.port === 443 ? 'https' : 'http';
+    // Empty body, like finish_init_language — the docs say the call takes none.
+    await this.httpRequest(proto, conn.ip, conn.port, '/reboot_recovery.fcgi', '', 10000, session);
+    // No logout: the device is rebooting.
+  }
+
+  /** From Web Recovery, reboot back into the normal firmware. */
+  async exitRecovery(ip: string): Promise<void> {
+    await this.recoveryCommand(ip, 'reboot_normal');
+  }
+
+  /**
+   * Reinstall the device firmware through Web Recovery, end to end:
+   * enter recovery (or ride a boot-loop into it) → run the update → poll
+   * status until FIM:/FINISH: → reboot normal → wait for the firmware to
+   * answer again and report its version.
+   *
+   * opts.factory runs run_factory_update.sh instead: DESTRUCTIVE — erases all
+   * configuration/users; the device comes back with factory defaults
+   * (admin/admin, possibly IP 192.168.0.129), so we only wait for it briefly.
+   */
+  async repairFirmware(
+    conn: DeviceConnection, opts: { factory?: boolean } = {}
+  ): Promise<{ firmwareVersion: string | null; message: string }> {
+    const ip = conn.ip;
+    const proto = conn.port === 443 ? 'https' : 'http';
+
+    // 1. Get into recovery. A boot-looping device may not accept login — in
+    //    that case just wait for a recovery window (the loop passes through
+    //    recovery) and pin it there with a recovery-mode reboot.
+    if (!(await this.isInRecovery(ip))) {
+      let commanded = false;
+      try {
+        const session = await this.login(conn);
+        await this.httpRequest(proto, ip, conn.port, '/reboot_recovery.fcgi', '', 10000, session);
+        commanded = true;
+      } catch { /* can't login (boot loop?) — wait for recovery to show up */ }
+      await this.waitFor(() => this.isInRecovery(ip), 240000, 2000,
+        'Device did not enter recovery mode (waited 4 min)');
+      if (!commanded) {
+        // We didn't put it here — it's cycling. Hold it in recovery. The old
+        // recovery page keeps answering for a few seconds before the reboot,
+        // so wait it out before trusting isInRecovery again.
+        await this.recoveryCommand(ip, 'reboot_recovery').catch(() => {});
+        await this.delay(10000);
+        await this.waitFor(() => this.isInRecovery(ip), 240000, 2000,
+          'Device did not settle in recovery mode (waited 4 min)');
+      }
+    }
+
+    // 2. Trigger the update and poll its status until it reports the end.
+    await this.recoveryCommand(ip, opts.factory ? 'run_factory_update' : 'run_update');
+    let status = '';
+    await this.waitFor(async () => {
+      try {
+        const s = await this.httpGetRaw('http', ip, 80, '/cgi/read_status.sh', 10000);
+        if (s) status = s;
+      } catch { /* transient — keep polling */ }
+      return /FINISH:|FIM:/i.test(status);
+    }, 600000, 2000, 'Firmware update did not finish within 10 min');
+    if (/error/i.test(status)) {
+      const tail = status.replace(/\s+/g, ' ').trim().slice(-200);
+      throw new Error(`Recovery update reported an error: ${tail}`);
+    }
+
+    // 3. Boot back into the normal firmware.
+    await this.recoveryCommand(ip, 'reboot_normal');
+
+    // 4. Wait for the firmware to answer (system_information needs no session).
+    //    After a factory update the device returns with factory defaults and
+    //    may change IP, so only a short best-effort wait applies there.
+    let version: string | null = null;
+    const back = async () => {
+      try {
+        const info = await this.httpRequest(proto, ip, conn.port, '/system_information.fcgi', '{}', 6000);
+        if (info && (info.version || info.serial)) {
+          version = info.version ?? null;
+          return true;
+        }
+      } catch { /* still booting */ }
+      return false;
+    };
+    if (opts.factory) {
+      let cameBack = true;
+      try { await this.waitFor(back, 90000, 3000, 'not back'); } catch { cameBack = false; }
+      return {
+        firmwareVersion: version,
+        message: cameBack
+          ? `Firmware reinstalled (factory) — device back online${version ? ` (v${version})` : ''}, now with factory credentials`
+          : 'Firmware reinstalled (factory). Device not seen on this IP — it likely came back with factory defaults (192.168.0.129, admin/admin); use Discovery to re-add it',
+      };
+    }
+    await this.waitFor(back, 300000, 3000,
+      'Update finished but the device did not come back online within 5 min');
+    return {
+      firmwareVersion: version,
+      message: `Firmware reinstalled — device back online${version ? ` (v${version})` : ''}`,
+    };
+  }
+
+  /** GET one of the recovery shell actions (recovery is always http://ip:80). */
+  private async recoveryCommand(
+    ip: string, cmd: 'run_update' | 'run_factory_update' | 'reboot_normal' | 'reboot_recovery'
+  ): Promise<string> {
+    return this.httpGetRaw('http', ip, 80, `/cgi/${cmd}.sh`, 15000);
+  }
+
   /**
    * Run the first-boot wizard steps in the exact order the device web UI uses:
    * set language → finish_init_language (posted with NO body) → accept_legal_terms
@@ -410,6 +551,18 @@ export class ControlIdAdapter implements DeviceAdapter {
 
   private delay(ms: number): Promise<void> {
     return new Promise(resolve => setTimeout(resolve, ms));
+  }
+
+  /** Poll `check` every `intervalMs` until it returns true or `timeoutMs` elapses. */
+  private async waitFor(
+    check: () => Promise<boolean>, timeoutMs: number, intervalMs: number, failMsg: string
+  ): Promise<void> {
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      if (await check()) return;
+      await this.delay(intervalMs);
+    }
+    throw new Error(failMsg);
   }
 
   /**

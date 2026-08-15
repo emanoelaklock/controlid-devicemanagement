@@ -20,7 +20,7 @@ contextBridge.exposeInMainWorld('api', {
       'history:device', 'history:all-recent',
       'dashboard:stats',
       'config:backup', 'config:backups', 'config:restore',
-      'firmware:summary', 'firmware:check-all',
+      'firmware:summary', 'firmware:check-all', 'firmware:repair', 'devices:recovery',
       'shell:open-url', 'dialog:prompt', 'dialog:confirm',
       'export:devices-csv', 'export:audit-csv',
     ];

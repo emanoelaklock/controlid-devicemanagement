@@ -651,6 +651,70 @@ export function registerIpcHandlers(getWindow: () => BrowserWindow | null): void
       }, getWindow());
   });
 
+  // Reinstall firmware via the device's Web Recovery mode. Devices are
+  // processed one at a time by the job queue (a natural staggered rollout —
+  // each device is offline for several minutes while it runs).
+  ipcMain.handle('firmware:repair', async (_e, { deviceIds, factory }: { deviceIds: string[]; factory?: boolean }) => {
+    return jobService.createJob('firmware_upgrade',
+      `${factory ? 'Factory reinstall' : 'Repair'} firmware on ${deviceIds.length} device(s)`, deviceIds,
+      async (conn, device) => {
+        const adapter = adapterRegistry.get(device.manufacturer);
+        if (!adapter?.repairFirmware) throw new Error('Adapter does not support firmware repair');
+        run(`UPDATE devices SET status='syncing', updated_at='${nowLocal()}' WHERE id=?`, [device.id]);
+        try {
+          const result = await adapter.repairFirmware(conn, { factory: !!factory });
+          if (result.firmwareVersion) {
+            run(`UPDATE devices SET status='online', firmware_version=?, last_heartbeat='${nowLocal()}', updated_at='${nowLocal()}' WHERE id=?`,
+              [result.firmwareVersion, device.id]);
+          } else {
+            run(`UPDATE devices SET status='offline', updated_at='${nowLocal()}' WHERE id=?`, [device.id]);
+          }
+          run(`INSERT INTO audit_logs (id, action, category, device_id, device_name, details, severity, created_at) VALUES (?,?,?,?,?,?,?,?)`,
+            [uuid(), factory ? 'firmware_factory_reinstall' : 'firmware_repair', 'firmware', device.id, device.name,
+             result.message, factory ? 'critical' : 'warning', nowLocal()]);
+          return result.message;
+        } catch (err: any) {
+          run(`UPDATE devices SET status='error', updated_at='${nowLocal()}' WHERE id=?`, [device.id]);
+          run(`INSERT INTO audit_logs (id, action, category, device_id, device_name, details, severity, created_at) VALUES (?,?,?,?,?,?,?,?)`,
+            [uuid(), 'firmware_repair_failed', 'firmware', device.id, device.name,
+             err?.message || 'Unknown error', 'error', nowLocal()]);
+          throw err;
+        }
+      }, getWindow());
+  });
+
+  // Manual recovery-mode control: check state, boot into recovery, boot back
+  // to normal. 'exit' needs no credential (the recovery web has no auth).
+  ipcMain.handle('devices:recovery', async (_e, { id, action }: { id: string; action: 'status' | 'enter' | 'exit' }) => {
+    const device = queryOne(`SELECT d.*, c.username, c.password as cred_password
+      FROM devices d LEFT JOIN credentials c ON d.credential_id = c.id WHERE d.id = ?`, [id]);
+    if (!device) throw new Error('Device not found');
+    const adapter = adapterRegistry.get(device.manufacturer);
+    if (!adapter?.isInRecovery) throw new Error('Adapter does not support recovery mode');
+
+    if (action === 'status') {
+      return { inRecovery: await adapter.isInRecovery(device.ip_address) };
+    }
+    if (action === 'enter') {
+      if (!adapter.enterRecovery) throw new Error('Adapter does not support recovery mode');
+      const conn: DeviceConnection = { ip: device.ip_address, port: device.port,
+        username: device.username || 'admin', password: device.cred_password ? decrypt(device.cred_password) : '' };
+      await adapter.enterRecovery(conn);
+      run(`UPDATE devices SET status='offline', updated_at='${nowLocal()}' WHERE id=?`, [id]);
+      run(`INSERT INTO audit_logs (id, action, category, device_id, device_name, details, severity, created_at) VALUES (?,?,?,?,?,?,?,?)`,
+        [uuid(), 'recovery_enter', 'firmware', id, device.name, 'Device rebooted into recovery mode', 'warning', nowLocal()]);
+      return { ok: true };
+    }
+    if (!adapter.exitRecovery) throw new Error('Adapter does not support recovery mode');
+    if (!(await adapter.isInRecovery(device.ip_address))) {
+      throw new Error('Device is not in recovery mode (or is unreachable on port 80)');
+    }
+    await adapter.exitRecovery(device.ip_address);
+    run(`INSERT INTO audit_logs (id, action, category, device_id, device_name, details, severity, created_at) VALUES (?,?,?,?,?,?,?,?)`,
+      [uuid(), 'recovery_exit', 'firmware', id, device.name, 'Normal reboot sent from recovery mode', 'info', nowLocal()]);
+    return { ok: true };
+  });
+
   // ─── Network Configuration ──────────────────────────────────────
 
   ipcMain.handle('devices:finish-setup', async (_e, { id, country }: any) => {

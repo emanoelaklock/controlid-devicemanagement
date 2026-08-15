@@ -48,6 +48,8 @@ Electron 32 | React 18 | Tailwind CSS (dark) | Vite 5 | sql.js (SQLite WASM) | I
 | Auto-update via GitHub Releases (electron-updater) | ✅ v2.1 (requer releases publicados) |
 | Network Config remoto (DHCP / IP fixo, modal) | ✅ v2.1 — via set_system_network.fcgi |
 | People management | ❌ Removido (via web) |
+| Firmware Repair via Web Recovery (individual + lote) | ✅ v2.2 — reboot_recovery.fcgi + cgi/*.sh |
+| Enter/Exit Recovery manual no painel do device | ✅ v2.2 |
 
 ## v2.1 — Descobertas importantes (correções de API)
 
@@ -98,6 +100,33 @@ Electron 32 | React 18 | Tailwind CSS (dark) | Vite 5 | sql.js (SQLite WASM) | I
    - Adapter: `commissionDevice` (onboarding+credencial, usado no "Set Credentials")
      e `finishSetup` (só onboarding, botão "Finish Setup" p/ recuperar leitora presa).
    - Reset de fábrica mantendo rede: `reset_to_factory_default.fcgi {keep_network_info:true}`.
+
+## v2.2 — Firmware Repair via Web Recovery
+
+**A API pública NÃO tem endpoint de upload de binário de firmware** (verificado na doc
+oficial access-api-pt e na doc antiga api_idaccess_V2.6.8). Versões NOVAS são baixadas
+pelo próprio equipamento (botão de update na tela About / web UI). O que a API expõe:
+
+- `POST /reboot_recovery.fcgi` (documentado oficialmente, corpo VAZIO, `?session=`) —
+  reinicia no modo Web Recovery.
+- **Web Recovery** (validado em iDFace Max real — ver `desktop-v2/tools/recovery-control.ps1`):
+  servidor HTTP puro na **porta 80** (independe de SSL/porta do firmware normal),
+  título da página contém "Recovery", **sem autenticação**. Ações via GET:
+  - `/cgi/run_update.sh` — reaplica o firmware armazenado, **MANTÉM config**
+  - `/cgi/run_factory_update.sh` — reinstala e **APAGA toda a config** (device volta
+    admin/admin e possivelmente IP 192.168.0.129)
+  - `/cgi/reboot_normal.sh` — boota no modo normal
+  - `/cgi/reboot_recovery.sh` — reboota FICANDO em recovery ("hold", prende device em loop)
+  - `/cgi/read_status.sh` — texto de progresso; termina com `FIM:`/`FINISH:` (erro se contiver "error")
+
+Implementação: `controlid.adapter.ts` → `isInRecovery`/`enterRecovery`/`exitRecovery`/
+`repairFirmware` (orquestração completa: entra em recovery — ou espera um boot loop passar
+por recovery e prende com hold — roda update, monitora status até 10 min, reboot normal,
+espera o firmware voltar até 5 min e confirma a versão). Handlers: `firmware:repair`
+(job `firmware_upgrade`, sequencial = rollout escalonado) e `devices:recovery`
+(status/enter/exit). UI: Firmware page (botão Repair por device + banner), Devices
+(batch "Repair FW"; painel: Repair Firmware, Enter/Exit Recovery, Factory Reinstall
+com confirmação digitada "ERASE").
 
 ## v2.1 — Bugs corrigidos
 

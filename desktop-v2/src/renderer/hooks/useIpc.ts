@@ -84,6 +84,8 @@ export const ipc = {
   // Firmware
   firmwareSummary: () => window.api.invoke('firmware:summary'),
   firmwareCheckAll: (deviceIds: string[]) => window.api.invoke('firmware:check-all', deviceIds),
+  firmwareRepair: (deviceIds: string[], factory?: boolean) => window.api.invoke('firmware:repair', { deviceIds, factory }),
+  deviceRecovery: (id: string, action: 'status' | 'enter' | 'exit') => window.api.invoke('devices:recovery', { id, action }),
 
   // Export
   exportDevicesCsv: () => window.api.invoke('export:devices-csv'),

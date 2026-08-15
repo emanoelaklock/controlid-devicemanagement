@@ -186,6 +186,13 @@ export default function DevicesPage() {
     setSelected(new Set());
   };
 
+  const handleBatchRepairFirmware = async () => {
+    if (!(await ipc.confirm(`Reinstall firmware on ${selected.size} device(s) via recovery mode? Devices are processed ONE AT A TIME and each stays offline for several minutes. Settings and users are kept.`))) return;
+    await ipc.firmwareRepair(Array.from(selected));
+    toast('Firmware repair job started — see Tasks page for progress.', 'info');
+    setSelected(new Set());
+  };
+
   const handleBatchTest = async () => {
     await ipc.batchTestConnection(Array.from(selected));
     setSelected(new Set());
@@ -281,6 +288,7 @@ export default function DevicesPage() {
               <button onClick={() => ipc.batchBackup(Array.from(selected))} className="px-3 py-1.5 bg-slate-600 text-white text-xs rounded-lg hover:bg-slate-500">Backup</button>
               <button onClick={handleBatchCredentials} className="px-3 py-1.5 bg-purple-600 text-white text-xs rounded-lg hover:bg-purple-700">Set Credentials</button>
               <button onClick={handleBatchReboot} className="px-3 py-1.5 bg-amber-600 text-white text-xs rounded-lg hover:bg-amber-700">Reboot</button>
+              <button onClick={handleBatchRepairFirmware} className="px-3 py-1.5 bg-rose-700 text-white text-xs rounded-lg hover:bg-rose-600">Repair FW</button>
             </div>
           )}
           <button onClick={() => ipc.exportDevicesCsv()} className="px-3 py-1.5 bg-slate-700 text-white text-xs rounded-lg hover:bg-slate-600">
@@ -524,6 +532,45 @@ export default function DevicesPage() {
                   {label}</button>
               ))}
             </div>
+            <button onClick={async () => {
+              if (!(await ipc.confirm('Reinstall the current firmware via recovery mode? Settings and users are KEPT. The device stays offline for several minutes while it reboots into recovery, reapplies its firmware image and boots back. Use this for corrupted firmware or boot loops.'))) return;
+              try {
+                await ipc.firmwareRepair([detail.id]);
+                toast('Firmware repair started — follow progress on the Tasks page.', 'info');
+              } catch (e: any) { toast(`Could not start repair: ${e.message || e}`, 'error'); }
+            }} disabled={!detail.credential_id}
+              className="w-full px-3 py-2 bg-rose-700 text-white text-xs rounded-lg hover:bg-rose-600 disabled:opacity-40 disabled:cursor-not-allowed">
+              Repair Firmware (recovery)</button>
+            <div className="flex gap-2">
+              <button onClick={async () => {
+                if (!(await ipc.confirm('Reboot this device into recovery mode? It goes offline and shows only the recovery screen until it is told to reboot normally (use "Exit Recovery").'))) return;
+                try {
+                  await ipc.deviceRecovery(detail.id, 'enter');
+                  toast('Recovery mode requested. The device is rebooting...', 'warning');
+                } catch (e: any) { toast(`Enter recovery failed: ${e.message || e}`, 'error'); }
+              }} disabled={!detail.credential_id}
+                className="flex-1 px-3 py-2 bg-slate-700 text-white text-xs rounded-lg hover:bg-slate-600 disabled:opacity-40 disabled:cursor-not-allowed">
+                Enter Recovery</button>
+              <button onClick={async () => {
+                try {
+                  await ipc.deviceRecovery(detail.id, 'exit');
+                  toast('Normal reboot sent. The device is leaving recovery mode...', 'success');
+                } catch (e: any) { toast(`${e.message || e}`, 'error'); }
+              }}
+                className="flex-1 px-3 py-2 bg-slate-700 text-white text-xs rounded-lg hover:bg-slate-600">
+                Exit Recovery</button>
+            </div>
+            <button onClick={async () => {
+              if (!(await ipc.confirm('FACTORY REINSTALL: reinstalls the firmware AND ERASES all configuration and users (like a factory reset). The device comes back with factory defaults (admin/admin, possibly IP 192.168.0.129). Continue?'))) return;
+              const word = await ipc.prompt('Factory Reinstall', 'Type ERASE to confirm:');
+              if (word !== 'ERASE') { if (word !== null) toast('Confirmation text did not match — cancelled.', 'info'); return; }
+              try {
+                await ipc.firmwareRepair([detail.id], true);
+                toast('Factory reinstall started — see Tasks. Afterwards, re-add the device via Discovery if it changes IP.', 'warning');
+              } catch (e: any) { toast(`Could not start factory reinstall: ${e.message || e}`, 'error'); }
+            }} disabled={!detail.credential_id}
+              className="w-full px-3 py-2 bg-red-900/60 text-red-300 text-xs rounded-lg hover:bg-red-800 disabled:opacity-40 disabled:cursor-not-allowed">
+              Factory Reinstall (wipes config)</button>
             <button onClick={async () => {
               if (!(await ipc.confirm('FACTORY RESET: This will erase all data on the device. Keep network settings?'))) return;
               const keepNet = await ipc.confirm('Preserve network configuration (IP, DHCP)?');

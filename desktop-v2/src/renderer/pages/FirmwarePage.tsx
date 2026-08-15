@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { ipc } from '../hooks/useIpc';
+import { toast } from '../components/Toast';
 
 export default function FirmwarePage() {
   const [summary, setSummary] = useState<any>(null);
@@ -18,6 +19,14 @@ export default function FirmwarePage() {
     } catch { setChecking(false); }
   };
 
+  const handleRepair = async (d: any) => {
+    if (!(await ipc.confirm(`Reinstall the current firmware on "${d.name}" via recovery mode? Settings and users are KEPT. The device stays offline for several minutes while it reboots into recovery, reapplies its firmware image and boots back.`))) return;
+    try {
+      await ipc.firmwareRepair([d.id]);
+      toast('Firmware repair started — follow progress on the Tasks page.', 'info');
+    } catch (e: any) { toast(`Could not start repair: ${e.message || e}`, 'error'); }
+  };
+
   if (!summary) return <div className="p-6 text-slate-500">Loading...</div>;
 
   return (
@@ -28,6 +37,15 @@ export default function FirmwarePage() {
           className="px-4 py-2 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700 disabled:opacity-50">
           {checking ? 'Checking...' : 'Check All Devices'}
         </button>
+      </div>
+
+      {/* How firmware installs work on Control iD devices */}
+      <div className="mb-6 px-4 py-3 bg-slate-800/60 border border-slate-700 rounded-xl text-xs text-slate-400">
+        <span className="text-slate-300 font-semibold">Repair</span> reinstalls the firmware image already
+        stored on the device through its recovery mode (settings and users are kept) — use it for corrupted
+        installs or boot loops. Control iD devices download <span className="text-slate-300">new</span> firmware
+        versions themselves via the update option on the device's About screen / web interface; the API does
+        not accept firmware uploads.
       </div>
 
       {/* Summary cards */}
@@ -69,6 +87,12 @@ export default function FirmwarePage() {
                     <td className="px-4 py-2 text-slate-400 font-mono text-xs">{d.ip_address}</td>
                     <td className="px-4 py-2">
                       <span className={`inline-block w-2 h-2 rounded-full ${d.status === 'online' ? 'bg-emerald-500' : 'bg-red-500'}`} />
+                    </td>
+                    <td className="px-4 py-2 text-right">
+                      <button onClick={() => handleRepair(d)}
+                        className="px-2.5 py-1 bg-slate-700 text-slate-300 text-xs rounded hover:bg-rose-700 hover:text-white transition-colors">
+                        Repair
+                      </button>
                     </td>
                   </tr>
                 ))}
