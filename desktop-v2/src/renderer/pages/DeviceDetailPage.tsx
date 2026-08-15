@@ -13,6 +13,24 @@ const STATUS_TEXT: Record<string, string> = {
   exec: 'var(--sr-exec-fg)', warn: 'var(--sr-warn-fg)', pend: 'var(--sr-pend-fg)',
 };
 
+/** Click-to-copy value (text selection is disabled app-wide). */
+function CopyValue({ label, value }: { label: string; value?: string | null }) {
+  if (!value) return <>—</>;
+  return (
+    <span
+      title="Click to copy"
+      style={{ cursor: 'copy' }}
+      onClick={async (e) => {
+        e.stopPropagation();
+        try {
+          await navigator.clipboard.writeText(value);
+          toast(`${label} copied.`, 'success');
+        } catch { toast('Could not copy.', 'error'); }
+      }}
+    >{value}</span>
+  );
+}
+
 function ActionRow({ label, danger = false, last = false, children }: {
   label: string; danger?: boolean; last?: boolean; children: ReactNode;
 }) {
@@ -335,7 +353,12 @@ export default function DeviceDetailPage({ deviceId, onBack }: { deviceId: strin
           <Card edge={STATUS_MARK[st.tone]} style={{ padding: '18px 22px', display: 'flex', alignItems: 'center', gap: 14, flexWrap: 'wrap' }}>
             <div style={{ minWidth: 0 }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                <h2 style={{ margin: 0, fontSize: 19, fontWeight: 700, letterSpacing: '-.3px', color: 'var(--text-strong)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                <h2 title="Click to copy the name"
+                  style={{ margin: 0, fontSize: 19, fontWeight: 700, letterSpacing: '-.3px', color: 'var(--text-strong)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', cursor: 'copy' }}
+                  onClick={async () => {
+                    try { await navigator.clipboard.writeText(device.name || device.ip_address); toast('Name copied.', 'success'); }
+                    catch { toast('Could not copy.', 'error'); }
+                  }}>
                   {device.name || device.ip_address}
                 </h2>
                 <Badge tone={st.tone} dot>{st.label}</Badge>
@@ -369,17 +392,26 @@ export default function DeviceDetailPage({ deviceId, onBack }: { deviceId: strin
               <InfoRow label="IP address">
                 <a href="#" onClick={e => { e.preventDefault(); openUrl(); }} style={{ fontWeight: 700 }}>{device.ip_address}:{device.port}</a>
               </InfoRow>
-              <InfoRow label="MAC">{device.mac_address || '—'}</InfoRow>
+              <InfoRow label="MAC"><CopyValue label="MAC address" value={device.mac_address} /></InfoRow>
               <InfoRow label="DHCP">{device.dhcp_enabled ? 'Yes · automatic' : 'No · static'}</InfoRow>
               <InfoRow label="Netmask">{liveNet?.netmask || '—'}</InfoRow>
               <InfoRow label="Gateway">{liveNet?.gateway || '—'}</InfoRow>
+              <InfoRow label="DNS">
+                {(() => {
+                  if (!liveNet) return '—';
+                  const dns1 = (liveNet.primary_dns || liveNet.dns_primary || '') as string;
+                  const dns2 = (liveNet.secondary_dns || liveNet.dns_secondary || '') as string;
+                  if (!dns1 && !dns2) return <span style={{ color: 'var(--sr-warn-fg)' }}>None — firmware updates need DNS</span>;
+                  return dns1 + (dns2 ? ` · ${dns2}` : '');
+                })()}
+              </InfoRow>
               <InfoRow label="HTTPS" last>{device.https_enabled ? `On · port ${device.port}` : `Off · port ${device.port}`}</InfoRow>
             </Card>
 
             <Card style={{ padding: '16px 18px' }}>
               <Eyebrow style={{ marginBottom: 6 }}>Equipment</Eyebrow>
               <InfoRow label="Model">{device.model || '—'}</InfoRow>
-              <InfoRow label="Serial">{device.serial_number || '—'}</InfoRow>
+              <InfoRow label="Serial"><CopyValue label="Serial" value={device.serial_number} /></InfoRow>
               <InfoRow label="Firmware">{device.firmware_version || '—'}</InfoRow>
               <InfoRow label="Manufacturer">{device.manufacturer === 'controlid' ? 'Control iD' : (device.manufacturer || '—')}</InfoRow>
               <InfoRow label="Group">
