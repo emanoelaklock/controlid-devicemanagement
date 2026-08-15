@@ -1,5 +1,7 @@
 import { useState, useEffect } from 'react';
 import { ipc } from '../hooks/useIpc';
+import { toast } from '../components/Toast';
+import { Badge, Button, Card, Eyebrow, StateBlock } from '../components/ui';
 
 export default function FirmwarePage() {
   const [summary, setSummary] = useState<any>(null);
@@ -18,71 +20,89 @@ export default function FirmwarePage() {
     } catch { setChecking(false); }
   };
 
-  if (!summary) return <div className="p-6 text-slate-500">Loading...</div>;
+  const handleRepair = async (d: any) => {
+    if (!(await ipc.confirm(`Reinstall the current firmware on "${d.name}" via recovery mode? Settings and users are KEPT. The device stays offline for several minutes while it reboots into recovery, reapplies its firmware image and boots back.`))) return;
+    try {
+      await ipc.firmwareRepair([d.id]);
+      toast('Firmware repair started — follow progress on the Tasks page.', 'info');
+    } catch (e: any) { toast(`Could not start repair: ${e.message || e}`, 'error'); }
+  };
+
+  if (!summary) return <div style={{ padding: '18px 28px', color: 'var(--text-muted)' }}>Loading…</div>;
+
+  const outdatedCount = summary.outdated.length;
 
   return (
-    <div className="p-6">
-      <div className="flex items-center justify-between mb-6">
-        <h1 className="text-xl font-bold text-white">Firmware Management</h1>
-        <button onClick={handleCheckAll} disabled={checking}
-          className="px-4 py-2 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700 disabled:opacity-50">
-          {checking ? 'Checking...' : 'Check All Devices'}
-        </button>
+    <div style={{ padding: '18px 28px 28px', display: 'flex', flexDirection: 'column', gap: 14 }}>
+      {/* Toolbar */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        <div style={{ flex: 1 }} />
+        <Button variant="primary" size="sm" disabled={checking} onClick={handleCheckAll}>
+          {checking ? 'Checking…' : 'Check all devices'}
+        </Button>
       </div>
 
-      {/* Summary cards */}
-      <div className="grid grid-cols-3 gap-4 mb-6">
-        <div className="bg-slate-800 rounded-xl border border-slate-700 p-4">
-          <p className="text-xs text-slate-500 uppercase tracking-wide">Total Devices</p>
-          <p className="text-2xl font-bold text-white mt-1">{summary.total}</p>
+      {/* How firmware installs work on Control iD devices */}
+      <div style={{
+        background: 'var(--sr-info-bg)', border: '1px solid var(--border)', borderRadius: 11,
+        padding: '10px 14px', fontSize: 12, color: 'var(--sr-info-fg)', lineHeight: 1.55,
+      }}>
+        <b>Repair</b> reinstalls the firmware image already stored on the device through its recovery
+        mode (settings and users are kept) — use it for corrupted installs or boot loops. Control iD
+        devices download <b>new</b> firmware versions themselves via the update option on the device's
+        About screen / web interface; the API does not accept firmware uploads.
+      </div>
+
+      {/* Summary tiles */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 14 }}>
+        <div style={{ borderRadius: 16, padding: '14px 16px', background: 'var(--sr-info-bg)', border: '1px solid rgba(0,0,0,.05)' }}>
+          <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: '1.1px', textTransform: 'uppercase', color: 'var(--sr-info-fg)', opacity: .8 }}>Total devices</div>
+          <div style={{ fontSize: 28, fontWeight: 800, marginTop: 6, fontVariantNumeric: 'tabular-nums', letterSpacing: '-.6px', color: 'var(--sr-info-fg)' }}>{summary.total}</div>
         </div>
-        <div className="bg-emerald-900/30 rounded-xl border border-emerald-700/50 p-4">
-          <p className="text-xs text-emerald-400 uppercase tracking-wide">Latest Version</p>
-          <p className="text-2xl font-bold text-emerald-300 mt-1 font-mono">{summary.latest || 'N/A'}</p>
+        <div style={{ borderRadius: 16, padding: '14px 16px', background: 'var(--sr-exec-bg)', border: '1px solid rgba(0,0,0,.05)' }}>
+          <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: '1.1px', textTransform: 'uppercase', color: 'var(--sr-exec-fg)', opacity: .8 }}>Latest version</div>
+          <div style={{ fontSize: 28, fontWeight: 800, marginTop: 6, fontVariantNumeric: 'tabular-nums', letterSpacing: '-.6px', color: 'var(--sr-exec-fg)' }}>{summary.latest || 'N/A'}</div>
         </div>
-        <div className={`rounded-xl border p-4 ${summary.outdated.length > 0 ? 'bg-amber-900/30 border-amber-700/50' : 'bg-slate-800 border-slate-700'}`}>
-          <p className={`text-xs uppercase tracking-wide ${summary.outdated.length > 0 ? 'text-amber-400' : 'text-slate-500'}`}>Outdated</p>
-          <p className={`text-2xl font-bold mt-1 ${summary.outdated.length > 0 ? 'text-amber-300' : 'text-white'}`}>{summary.outdated.length}</p>
+        <div style={{ borderRadius: 16, padding: '14px 16px', background: outdatedCount > 0 ? 'var(--sr-warn-bg)' : 'var(--sr-aguard-bg)', border: '1px solid rgba(0,0,0,.05)' }}>
+          <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: '1.1px', textTransform: 'uppercase', color: outdatedCount > 0 ? 'var(--sr-warn-fg)' : 'var(--sr-aguard-fg)', opacity: .8 }}>Outdated</div>
+          <div style={{ fontSize: 28, fontWeight: 800, marginTop: 6, fontVariantNumeric: 'tabular-nums', letterSpacing: '-.6px', color: outdatedCount > 0 ? 'var(--sr-warn-fg)' : 'var(--sr-aguard-fg)' }}>{outdatedCount}</div>
         </div>
       </div>
 
       {/* Version breakdown */}
-      <div className="space-y-4">
-        {summary.versions.map((v: any) => (
-          <div key={v.version} className="bg-slate-800 rounded-xl border border-slate-700 overflow-hidden">
-            <div className="px-4 py-3 border-b border-slate-700 flex items-center justify-between">
-              <div className="flex items-center gap-3">
-                <span className={`w-3 h-3 rounded-full ${v.isLatest ? 'bg-emerald-500' : v.version === 'Unknown' ? 'bg-slate-500' : 'bg-amber-500'}`} />
-                <span className="text-sm font-semibold text-white font-mono">{v.version}</span>
-                {v.isLatest && <span className="text-xs text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded-full">Latest</span>}
-                {!v.isLatest && v.version !== 'Unknown' && (
-                  <span className="text-xs text-amber-400 bg-amber-500/10 px-2 py-0.5 rounded-full">Outdated</span>
-                )}
-              </div>
-              <span className="text-xs text-slate-500">{v.count} device(s)</span>
+      {summary.versions.map((v: any) => (
+        <Card key={v.version} style={{ overflow: 'hidden' }}>
+          <div style={{ padding: '12px 16px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+              <span style={{
+                width: 10, height: 10, borderRadius: '50%',
+                background: v.isLatest ? 'var(--sr-exec-m)' : v.version === 'Unknown' ? 'var(--sr-aguard-m)' : 'var(--sr-warn-m)',
+              }} />
+              <span style={{ fontSize: 13.5, fontWeight: 700, fontVariantNumeric: 'tabular-nums', color: 'var(--text-strong)' }}>{v.version}</span>
+              {v.isLatest && <Badge tone="exec">Latest</Badge>}
+              {!v.isLatest && v.version !== 'Unknown' && <Badge tone="warn">Outdated</Badge>}
             </div>
-            <table className="w-full text-sm">
-              <tbody className="divide-y divide-slate-700/50">
-                {v.devices.map((d: any) => (
-                  <tr key={d.id} className="hover:bg-slate-800/50">
-                    <td className="px-4 py-2 text-white">{d.name}</td>
-                    <td className="px-4 py-2 text-slate-400 font-mono text-xs">{d.ip_address}</td>
-                    <td className="px-4 py-2">
-                      <span className={`inline-block w-2 h-2 rounded-full ${d.status === 'online' ? 'bg-emerald-500' : 'bg-red-500'}`} />
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+            <span style={{ fontSize: 11.5, color: 'var(--text-muted)', fontVariantNumeric: 'tabular-nums' }}>{v.count} device(s)</span>
           </div>
-        ))}
-      </div>
+          {v.devices.map((d: any, i: number) => (
+            <div key={d.id} style={{
+              display: 'flex', alignItems: 'center', gap: 12, padding: '8px 16px',
+              borderTop: i === 0 ? 'none' : '1px solid var(--border)',
+            }}>
+              <span style={{ width: 8, height: 8, borderRadius: '50%', flex: 'none', background: d.status === 'online' ? 'var(--sr-exec-m)' : 'var(--sr-pend-m)' }} />
+              <span style={{ fontSize: 12.5, fontWeight: 700, color: 'var(--text)', flex: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{d.name}</span>
+              <span style={{ fontSize: 12, color: 'var(--text-muted)', fontVariantNumeric: 'tabular-nums' }}>{d.ip_address}</span>
+              <Button variant="warn-outline" size="sm" onClick={() => handleRepair(d)}>Repair</Button>
+            </div>
+          ))}
+        </Card>
+      ))}
 
       {summary.versions.length === 0 && (
-        <div className="text-center py-16 text-slate-600">
-          <p className="text-lg mb-2">No firmware data</p>
-          <p className="text-sm">Click "Check All Devices" to query firmware versions from all managed devices.</p>
-        </div>
+        <Card style={{ overflow: 'hidden' }}>
+          <StateBlock variant="empty" title="No firmware data"
+            message='Click "Check all devices" to query firmware versions from all managed devices.' />
+        </Card>
       )}
     </div>
   );

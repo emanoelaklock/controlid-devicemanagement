@@ -18,16 +18,31 @@ export const ipc = {
   deleteDevice: (id: string) => window.api.invoke('devices:delete', id),
   testConnection: (id: string) => window.api.invoke('devices:test-connection', id),
   locateDevice: (id: string) => window.api.invoke('devices:locate', id),
+  locatePhysical: (id: string, opts: { buzz?: boolean; message?: string }) => window.api.invoke('devices:locate-physical', { id, ...opts }),
   rebootDevice: (id: string) => window.api.invoke('devices:reboot', id),
   openDoor: (deviceId: string, doorId?: number) => window.api.invoke('devices:open-door', { deviceId, doorId }),
   setTime: (id: string) => window.api.invoke('devices:set-time', id),
   factoryReset: (id: string, keepNetwork: boolean) => window.api.invoke('devices:factory-reset', { id, keepNetwork }),
   setNetwork: (id: string, network: any) => window.api.invoke('devices:set-network', { id, network }),
+  getNetwork: (id: string) => window.api.invoke('devices:get-network', id),
+  finishSetup: (id: string, country?: string) => window.api.invoke('devices:finish-setup', { id, country }),
+  downloadLogs: (id: string, kind: 'diagnostic' | 'audit') => window.api.invoke('devices:download-logs', { id, kind }),
 
   // Batch
   batchReboot: (ids: string[]) => window.api.invoke('batch:reboot', ids),
   batchTestConnection: (ids: string[]) => window.api.invoke('batch:test-connection', ids),
   batchBackup: (ids: string[]) => window.api.invoke('batch:backup', ids),
+  batchChangeCredentials: (deviceIds: string[], newUsername: string, newPassword: string, country?: string) =>
+    window.api.invoke('batch:change-credentials', { deviceIds, newUsername, newPassword, country }),
+  batchSetNtp: (deviceIds: string[], enabled: boolean, timezone: string) =>
+    window.api.invoke('batch:set-ntp', { deviceIds, enabled, timezone }),
+  batchHarden: (deviceIds: string[], https: 'enable' | 'disable' | 'keep', ssh: 'enable' | 'disable' | 'keep') =>
+    window.api.invoke('batch:harden', { deviceIds, https, ssh }),
+  securityAudit: (deviceIds: string[]) => window.api.invoke('security:audit', deviceIds),
+
+  // App settings
+  getSettings: () => window.api.invoke('settings:get-all'),
+  setSetting: (key: string, value: string) => window.api.invoke('settings:set', { key, value }),
 
   // Discovery
   startScan: (request: any) => window.api.invoke('discovery:scan', request),
@@ -67,6 +82,8 @@ export const ipc = {
   // Connection History
   deviceHistory: (deviceId: string, days?: number) => window.api.invoke('history:device', { deviceId, days }),
   recentHistory: (limit?: number) => window.api.invoke('history:all-recent', { limit }),
+  devicesHealth: (): Promise<Record<string, { drops_24h: number; drops_7d: number; availability_7d: number; unstable: boolean }>> =>
+    window.api.invoke('devices:health'),
 
   // Dashboard
   getStats: () => window.api.invoke('dashboard:stats'),
@@ -75,18 +92,23 @@ export const ipc = {
   backupConfig: (deviceId: string) => window.api.invoke('config:backup', deviceId),
   listBackups: (deviceId: string) => window.api.invoke('config:backups', deviceId),
   restoreConfig: (deviceId: string, backupId: string) => window.api.invoke('config:restore', { deviceId, backupId }),
+  getLiveConfig: (deviceId: string) => window.api.invoke('config:get-live', deviceId),
+  applyConfig: (deviceId: string, config: any) => window.api.invoke('config:apply', { deviceId, config }),
 
-  // Templates
+  // Config templates
   listTemplates: () => window.api.invoke('templates:list'),
-  createTemplateFromDevice: (deviceId: string, templateName: string) => window.api.invoke('templates:create-from-device', { deviceId, templateName }),
-  createTemplate: (data: any) => window.api.invoke('templates:create', data),
   getTemplate: (id: string) => window.api.invoke('templates:get', id),
+  createTemplate: (data: { name: string; description?: string; config?: any }) => window.api.invoke('templates:create', data),
+  updateTemplate: (id: string, data: { name?: string; description?: string; config?: any }) => window.api.invoke('templates:update', { id, ...data }),
   deleteTemplate: (id: string) => window.api.invoke('templates:delete', id),
   applyTemplate: (templateId: string, deviceIds: string[]) => window.api.invoke('templates:apply', { templateId, deviceIds }),
+  complianceCheck: (templateId: string, deviceIds: string[]) => window.api.invoke('templates:compliance', { templateId, deviceIds }),
 
   // Firmware
   firmwareSummary: () => window.api.invoke('firmware:summary'),
   firmwareCheckAll: (deviceIds: string[]) => window.api.invoke('firmware:check-all', deviceIds),
+  firmwareRepair: (deviceIds: string[], factory?: boolean) => window.api.invoke('firmware:repair', { deviceIds, factory }),
+  deviceRecovery: (id: string, action: 'status' | 'enter' | 'exit') => window.api.invoke('devices:recovery', { id, action }),
 
   // Export
   exportDevicesCsv: () => window.api.invoke('export:devices-csv'),

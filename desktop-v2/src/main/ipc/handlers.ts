@@ -4,6 +4,7 @@ import fs from 'fs';
 import { query, queryOne, run, count, insertAndReturn, nowLocal } from '../db/queries';
 import { discoveryService } from '../services/discovery.service';
 import { jobService } from '../services/job.service';
+import { schedulerService } from '../services/scheduler.service';
 import { adapterRegistry } from '../adapters/registry';
 import { encrypt, decrypt } from '../utils/encryption';
 import { DeviceConnection } from '../types';
@@ -34,10 +35,16 @@ export function registerIpcHandlers(getWindow: () => BrowserWindow | null): void
     return insertAndReturn('devices', { id, ...data, status: 'unknown' });
   });
 
+  const DEVICE_UPDATABLE_COLUMNS = new Set([
+    'name', 'manufacturer', 'model', 'serial_number', 'mac_address', 'ip_address',
+    'port', 'hostname', 'firmware_version', 'status', 'credential_id', 'group_id',
+    'tags', 'notes', 'https_enabled', 'dhcp_enabled',
+  ]);
+
   ipcMain.handle('devices:update', (_e, { id, data }: { id: string; data: any }) => {
     const existing = queryOne('SELECT * FROM devices WHERE id = ?', [id]);
     if (!existing) throw new Error('Device not found');
-    const fields = Object.entries(data).filter(([_, v]) => v !== undefined);
+    const fields = Object.entries(data).filter(([k, v]) => v !== undefined && DEVICE_UPDATABLE_COLUMNS.has(k));
     if (fields.length === 0) return existing;
     const setClause = fields.map(([k]) => `${k}=?`).join(',');
     run(`UPDATE devices SET ${setClause}, updated_at='${nowLocal()}' WHERE id=?`,
@@ -129,7 +136,7 @@ export function registerIpcHandlers(getWindow: () => BrowserWindow | null): void
     // Step 2: Authenticate with each live IP to get MAC
     for (const ip of liveIps) {
       try {
-        const adapter = adapterRegistry.getAll()[0];
+        const adapter = adapterRegistry.get(device.manufacturer) ?? adapterRegistry.getAll()[0];
         if (!adapter) continue;
         const info = await adapter.authenticate(ip, device.port, username, password);
         console.log(`[Locate] ${ip} -> MAC: ${info?.macAddress}`);
@@ -172,6 +179,34 @@ export function registerIpcHandlers(getWindow: () => BrowserWindow | null): void
     return adapter.openDoor(conn, doorId);
   });
 
+  // Physically locate a device: beep and/or flash a message on its screen.
+  ipcMain.handle('devices:locate-physical', async (_e, { id, buzz, message }: { id: string; buzz?: boolean; message?: string }) => {
+    const device = queryOne(`SELECT d.*, c.username, c.password as cred_password
+      FROM devices d LEFT JOIN credentials c ON d.credential_id = c.id WHERE d.id = ?`, [id]);
+    if (!device) throw new Error('Device not found');
+    const adapter = adapterRegistry.get(device.manufacturer) as any;
+    if (!adapter) throw new Error('No adapter');
+    const conn: DeviceConnection = { ip: device.ip_address, port: device.port,
+      username: device.username || 'admin', password: device.cred_password ? decrypt(device.cred_password) : '' };
+
+    const done: string[] = [];
+    if (message !== undefined && adapter.showMessage) {
+      if (await adapter.showMessage(conn, message, 10000)) done.push('message shown');
+    }
+    if (buzz && adapter.buzz) {
+      // Three short beeps so it's audible across a room.
+      for (let i = 0; i < 3; i++) {
+        await adapter.buzz(conn, { timeoutMs: 400 });
+        if (i < 2) await new Promise(r => setTimeout(r, 250));
+      }
+      done.push('buzzer sounded');
+    }
+    if (done.length === 0) throw new Error('This device does not support buzzer or screen messages');
+    run(`INSERT INTO audit_logs (id, action, category, device_id, device_name, details, severity, created_at) VALUES (?,?,?,?,?,?,?,?)`,
+      [uuid(), 'locate_physical', 'device', id, device.name, `Physical locate: ${done.join(', ')}`, 'info', nowLocal()]);
+    return { ok: true, done };
+  });
+
   ipcMain.handle('devices:set-time', async (_e, id: string) => {
     const device = queryOne(`SELECT d.*, c.username, c.password as cred_password
       FROM devices d LEFT JOIN credentials c ON d.credential_id = c.id WHERE d.id = ?`, [id]);
@@ -184,10 +219,10 @@ export function registerIpcHandlers(getWindow: () => BrowserWindow | null): void
       JSON.stringify({ login: device.username || 'admin', password: pw }), 10000);
     if (!loginRes?.session) throw new Error('Authentication failed');
 
-    // Set timezone first (offset in seconds from UTC)
+    // Set timezone first (set_configuration values must be strings)
     const tzOffsetSeconds = -(new Date().getTimezoneOffset() * 60);
     await adapter.httpRequest(proto, device.ip_address, device.port, '/set_configuration.fcgi',
-      JSON.stringify({ general: { timezone: tzOffsetSeconds } }), 10000, loginRes.session).catch(() => {});
+      JSON.stringify({ general: { timezone: String(tzOffsetSeconds) } }), 10000, loginRes.session).catch(() => {});
 
     // Set time - try both formats
     const now = new Date();
@@ -270,7 +305,7 @@ export function registerIpcHandlers(getWindow: () => BrowserWindow | null): void
              info.httpsEnabled ? 1 : 0, info.dhcpEnabled ? 1 : 0, info.hostname, device.id]);
           return `Online - ${info.model} v${info.firmwareVersion} MAC:${info.macAddress || 'N/A'}`;
         }
-        run(`UPDATE devices SET status='unreachable' WHERE id=?`, [device.id]);
+        run(`UPDATE devices SET status='unreachable', updated_at='${nowLocal()}' WHERE id=?`, [device.id]);
         throw new Error('Could not connect');
       }, getWindow());
   });
@@ -285,6 +320,54 @@ export function registerIpcHandlers(getWindow: () => BrowserWindow | null): void
         run(`INSERT INTO config_backups (id, device_id, device_name, config, version) VALUES (?,?,?,?,?)`,
           [uuid(), device.id, device.name, JSON.stringify(config), version]);
         return `Backup v${version} saved`;
+      }, getWindow());
+  });
+
+  // Change device login (web + API credential) remotely, in batch.
+  // Creates/reuses a local credential record and re-assigns each device on
+  // success, so the app keeps connecting after the change.
+  ipcMain.handle('batch:change-credentials', async (_e, { deviceIds, newUsername, newPassword, country }: any) => {
+    if (!newUsername || !newPassword) throw new Error('Username and password are required');
+
+    // Country/language are only used for devices still in first-boot state, where
+    // changing the login also requires completing the on-screen setup wizard.
+    const countryCode = String(country || 'BR').toUpperCase();
+    const LANG_BY_COUNTRY: Record<string, string> = { BR: 'pt_BR', PT: 'pt_BR', US: 'en_US', GB: 'en_US', ES: 'spa_SPA', FR: 'fr_FR', DE: 'de_DE' };
+    const language = LANG_BY_COUNTRY[countryCode] || 'pt_BR';
+
+    // Reuse a credential with the same username+password if it exists, else create one
+    let credential = query('SELECT * FROM credentials').find((c: any) => {
+      try { return c.username === newUsername && decrypt(c.password) === newPassword; } catch { return false; }
+    });
+    if (!credential) {
+      const credId = uuid();
+      const ts = nowLocal();
+      run(`INSERT INTO credentials (id, name, username, password, is_default, created_at, updated_at) VALUES (?,?,?,?,0,?,?)`,
+        [credId, `${newUsername} (set ${ts.split(' ')[0]})`, newUsername, encrypt(newPassword), ts, ts]);
+      credential = queryOne('SELECT * FROM credentials WHERE id = ?', [credId]);
+    }
+    const credentialId = credential.id;
+
+    return jobService.createJob('batch_credential', `Set credentials on ${deviceIds.length} devices`, deviceIds,
+      async (conn, device) => {
+        const adapter = adapterRegistry.get(device.manufacturer) as any;
+        if (!adapter) throw new Error('No adapter');
+        // commissionDevice completes first-boot onboarding (language/legal terms)
+        // before changing the login; on an already-set-up device it's just the
+        // credential change. Fall back to changePassword for other adapters.
+        const result = adapter.commissionDevice
+          ? await adapter.commissionDevice(conn, { newUsername, newPassword, language, countryCode })
+          : { ok: await adapter.changePassword(conn, newUsername, newPassword), onboarded: false };
+        if (!result.ok) throw new Error('Device rejected credential change (check current credentials)');
+        run(`UPDATE devices SET credential_id=?, updated_at='${nowLocal()}' WHERE id=?`, [credentialId, device.id]);
+        run(`INSERT INTO audit_logs (id, action, category, device_id, device_name, details, severity, created_at) VALUES (?,?,?,?,?,?,?,?)`,
+          [uuid(), 'credentials_changed', 'credential', device.id, device.name,
+           result.onboarded
+             ? `Initial setup completed (${language}/${countryCode}) and login changed to "${newUsername}"`
+             : `Login changed to "${newUsername}" and verified`, 'warning', nowLocal()]);
+        return result.onboarded
+          ? `Set up (${language}/${countryCode}) + credentials "${newUsername}"`
+          : `Credentials changed to "${newUsername}" and verified`;
       }, getWindow());
   });
 
@@ -419,7 +502,7 @@ export function registerIpcHandlers(getWindow: () => BrowserWindow | null): void
             JSON.stringify({ object: 'cards', values: [{ user_id: parseInt(person.registration, 10), value: parseInt(person.card_number, 10) }] }), 10000, loginRes.session);
         }
         await controlId.httpRequest(proto, device.ip_address, device.port, '/logout.fcgi', '{}', 5000, loginRes.session).catch(() => {});
-        run("UPDATE person_devices SET synced = 1, synced_at = '${nowLocal()}' WHERE person_id = ? AND device_id = ?", [personId, deviceId]);
+        run('UPDATE person_devices SET synced = 1, synced_at = ? WHERE person_id = ? AND device_id = ?', [nowLocal(), personId, deviceId]);
         return true;
       }
     }
@@ -445,7 +528,7 @@ export function registerIpcHandlers(getWindow: () => BrowserWindow | null): void
             await adapter.httpRequest(proto, device.ip_address, device.port, '/create_objects.fcgi',
               JSON.stringify({ object: 'cards', values: [{ user_id: parseInt(person.registration, 10), value: parseInt(person.card_number, 10) }] }), 10000, loginRes.session);
           }
-          run("UPDATE person_devices SET synced = 1, synced_at = '${nowLocal()}' WHERE person_id = ? AND device_id = ?", [personId, device.id]);
+          run('UPDATE person_devices SET synced = 1, synced_at = ? WHERE person_id = ? AND device_id = ?', [nowLocal(), personId, device.id]);
           synced++;
         }
         await adapter.httpRequest(proto, device.ip_address, device.port, '/logout.fcgi', '{}', 5000, loginRes.session).catch(() => {});
@@ -495,6 +578,84 @@ export function registerIpcHandlers(getWindow: () => BrowserWindow | null): void
     return query(`SELECT ch.*, d.name as device_name, d.ip_address
       FROM connection_history ch JOIN devices d ON ch.device_id = d.id
       ORDER BY ch.timestamp DESC LIMIT ?`, [limit || 50]);
+  });
+
+  // ─── Connection health (per-device drops + 7d availability) ─────
+
+  ipcMain.handle('devices:health', () => {
+    // Timestamps in connection_history are local time ("YYYY-MM-DD HH:MM:SS").
+    const parseLocal = (s: string): number => {
+      const p = s.replace('T', ' ').split(/[- :]/).map(Number);
+      return new Date(p[0], p[1] - 1, p[2], p[3] || 0, p[4] || 0, p[5] || 0).getTime();
+    };
+    const now = Date.now();
+    const DAY = 24 * 60 * 60 * 1000;
+    const winStart = now - 7 * DAY;
+
+    const devices = query(`SELECT id, status, created_at, last_heartbeat FROM devices`);
+    const events = query(`SELECT device_id, event, timestamp FROM connection_history
+      WHERE timestamp >= datetime('now','localtime','-7 days') ORDER BY timestamp ASC`);
+    // State each device was in when the 7-day window opened (SQLite picks the
+    // row that matches MAX(timestamp) for the bare "event" column).
+    const prior = query(`SELECT device_id, event, MAX(timestamp) as timestamp
+      FROM connection_history WHERE timestamp < datetime('now','localtime','-7 days')
+      GROUP BY device_id`);
+
+    const byDevice = new Map<string, any[]>();
+    for (const e of events) {
+      if (!byDevice.has(e.device_id)) byDevice.set(e.device_id, []);
+      byDevice.get(e.device_id)!.push(e);
+    }
+    const priorState = new Map<string, string>();
+    for (const p of prior) priorState.set(p.device_id, p.event);
+
+    const health: Record<string, any> = {};
+    for (const d of devices) {
+      const evs = byDevice.get(d.id) || [];
+      // A device registered mid-window is only measured from its creation.
+      const created = d.created_at ? parseLocal(d.created_at) : winStart;
+      const start = Math.max(winStart, Math.min(created, now));
+      const span = Math.max(now - start, 1);
+
+      let state: string;
+      if (priorState.has(d.id)) state = priorState.get(d.id)!;
+      else if (evs.length) state = evs[0].event === 'online' ? 'offline' : 'online';
+      else state = d.status === 'online' ? 'online' : 'offline';
+
+      let onlineMs = 0;
+      let cursor = start;
+      let drops24 = 0, drops7 = 0;
+      for (const e of evs) {
+        const t = Math.min(Math.max(parseLocal(e.timestamp), start), now);
+        if (state === 'online') onlineMs += t - cursor;
+        cursor = t;
+        state = e.event;
+        if (e.event === 'offline') {
+          drops7++;
+          if (t >= now - DAY) drops24++;
+        }
+      }
+      if (state === 'online') {
+        if (d.status === 'online') {
+          onlineMs += now - cursor;
+        } else {
+          // The device is offline but no 'offline' event was recorded (the app
+          // was closed when it dropped) — count it online only up to the last
+          // heartbeat we actually saw.
+          const lastHb = d.last_heartbeat ? parseLocal(d.last_heartbeat) : cursor;
+          onlineMs += Math.max(0, Math.min(lastHb, now) - cursor);
+        }
+      }
+
+      const availability = Math.max(0, Math.min(100, (onlineMs / span) * 100));
+      health[d.id] = {
+        drops_24h: drops24,
+        drops_7d: drops7,
+        availability_7d: Math.round(availability * 10) / 10,
+        unstable: d.status === 'online' && drops24 >= 3,
+      };
+    }
+    return health;
   });
 
   // ─── Dashboard ──────────────────────────────────────────────────
@@ -557,217 +718,249 @@ export function registerIpcHandlers(getWindow: () => BrowserWindow | null): void
     return ok;
   });
 
-  // ─── Config Templates ──────────────────────────────────────────
+  // ─── App settings (scheduled backup) ────────────────────────────
 
-  ipcMain.handle('templates:list', () => {
-    return query('SELECT * FROM config_templates ORDER BY name ASC');
+  const SETTABLE_KEYS = new Set(['backup_enabled', 'backup_hour', 'backup_retention']);
+
+  ipcMain.handle('settings:get-all', () => {
+    const rows = query('SELECT key, value FROM app_settings');
+    return Object.fromEntries(rows.map((r: any) => [r.key, r.value]));
   });
 
-  ipcMain.handle('templates:create-from-device', async (_e, { deviceId, templateName }: any) => {
+  ipcMain.handle('settings:set', (_e, { key, value }: { key: string; value: string }) => {
+    if (!SETTABLE_KEYS.has(key)) throw new Error(`Setting not allowed: ${key}`);
+    schedulerService.setSetting(key, String(value));
+  });
+
+  // ─── Security hardening ─────────────────────────────────────────
+
+  // Batch hardening: HTTPS (self-signed cert via set_system_network) and SSH
+  // (general.ssh_enabled). SSH is applied first — enabling HTTPS moves the
+  // device to port 443 and drops the current connection, so it goes last.
+  // The app model derives the protocol from the port, so HTTPS pins
+  // web_server_port to 443 (and disable pins it back to 80) and updates the
+  // device row to match.
+  ipcMain.handle('batch:harden', async (_e, { deviceIds, https, ssh }:
+      { deviceIds: string[]; https: 'enable' | 'disable' | 'keep'; ssh: 'enable' | 'disable' | 'keep' }) => {
+    if (https === 'keep' && ssh === 'keep') throw new Error('Nothing selected to change');
+    return jobService.createJob('batch_config', `Harden ${deviceIds.length} device(s)`, deviceIds,
+      async (conn, device) => {
+        const adapter = adapterRegistry.get(device.manufacturer);
+        if (!adapter) throw new Error('No adapter');
+        const done: string[] = [];
+        if (ssh !== 'keep') {
+          const ok = await adapter.setConfig(conn, { general: { ssh_enabled: ssh === 'enable' ? '1' : '0' } });
+          if (!ok) throw new Error('Device rejected the SSH setting');
+          done.push(ssh === 'enable' ? 'SSH enabled' : 'SSH disabled');
+        }
+        if (https !== 'keep') {
+          if (!adapter.setNetwork) throw new Error('Adapter does not support network changes');
+          const enable = https === 'enable';
+          await adapter.setNetwork(conn, {
+            ssl_enabled: enable,
+            self_signed_certificate: enable,
+            web_server_port: enable ? 443 : 80,
+          });
+          run(`UPDATE devices SET port=?, https_enabled=?, status='offline', updated_at='${nowLocal()}' WHERE id=?`,
+            [enable ? 443 : 80, enable ? 1 : 0, device.id]);
+          done.push(enable ? 'HTTPS enabled (self-signed, port 443)' : 'HTTPS disabled (port 80)');
+        }
+        run(`INSERT INTO audit_logs (id, action, category, device_id, device_name, details, severity, created_at) VALUES (?,?,?,?,?,?,?,?)`,
+          [uuid(), 'device_hardened', 'device', device.id, device.name, done.join('; '), 'warning', nowLocal()]);
+        return done.join('; ');
+      }, getWindow());
+  });
+
+  // Factory-credential audit: try admin/admin against each device. A device
+  // that accepts it is flagged (factory_credentials=1) and its job item FAILS
+  // so it stands out; an unreachable device is left un-audited (NULL/previous
+  // value) rather than wrongly marked safe.
+  ipcMain.handle('security:audit', async (_e, deviceIds: string[]) => {
+    return jobService.createJob('health_check', `Factory-credential audit on ${deviceIds.length} device(s)`, deviceIds,
+      async (_conn, device) => {
+        const adapter = adapterRegistry.get(device.manufacturer);
+        if (!adapter) throw new Error('No adapter');
+        const factoryInfo = await adapter.authenticate(device.ip_address, device.port, 'admin', 'admin');
+        if (factoryInfo) {
+          run(`UPDATE devices SET factory_credentials=1, updated_at='${nowLocal()}' WHERE id=?`, [device.id]);
+          run(`INSERT INTO audit_logs (id, action, category, device_id, device_name, details, severity, created_at) VALUES (?,?,?,?,?,?,?,?)`,
+            [uuid(), 'factory_credentials', 'device', device.id, device.name,
+             'Device still accepts factory credentials (admin/admin)', 'critical', nowLocal()]);
+          throw new Error('FACTORY CREDENTIALS ACCEPTED — use "Set Credentials" to change them');
+        }
+        // admin/admin rejected — make sure that's a real rejection, not the
+        // device being offline.
+        const reachable = await adapter.probe(device.ip_address, device.port, 6000);
+        if (!reachable) throw new Error('Unreachable — not audited');
+        run(`UPDATE devices SET factory_credentials=0, updated_at='${nowLocal()}' WHERE id=?`, [device.id]);
+        return 'OK — factory credentials rejected';
+      }, getWindow());
+  });
+
+  // ─── Batch NTP ──────────────────────────────────────────────────
+
+  // Enable/disable NTP time sync and set the timezone fleet-wide. The API's
+  // ntp module has exactly these two fields (enabled "0"/"1", timezone
+  // "UTC-12".."UTC+12") — there is no NTP server address field.
+  ipcMain.handle('batch:set-ntp', async (_e, { deviceIds, enabled, timezone }: { deviceIds: string[]; enabled: boolean; timezone: string }) => {
+    if (enabled && !/^UTC[+-]\d{1,2}(:\d{2})?$/.test(timezone)) {
+      throw new Error('Timezone must be in the form UTC-3 / UTC+5:30');
+    }
+    const config = enabled
+      ? { ntp: { enabled: '1', timezone } }
+      : { ntp: { enabled: '0' } };
+    return jobService.createJob('batch_config',
+      `${enabled ? `Enable NTP (${timezone})` : 'Disable NTP'} on ${deviceIds.length} device(s)`, deviceIds,
+      async (conn, device) => {
+        const adapter = adapterRegistry.get(device.manufacturer);
+        if (!adapter) throw new Error('No adapter');
+        const ok = await adapter.setConfig(conn, config);
+        if (!ok) throw new Error('Device rejected the NTP configuration');
+        run(`INSERT INTO audit_logs (id, action, category, device_id, device_name, details, severity, created_at) VALUES (?,?,?,?,?,?,?,?)`,
+          [uuid(), 'ntp_configured', 'config', device.id, device.name,
+           enabled ? `NTP enabled, timezone ${timezone}` : 'NTP disabled', 'info', nowLocal()]);
+        return enabled ? `NTP enabled (${timezone})` : 'NTP disabled';
+      }, getWindow());
+  });
+
+  // ─── Configuration editor & templates ───────────────────────────
+
+  // Normalize a config value for display/compare: the device returns strings,
+  // but JSON parsing can surface booleans/numbers — map everything onto the
+  // string form set_configuration expects ("1"/"0" for booleans).
+  const normValue = (v: unknown): string => {
+    if (v === null || v === undefined) return '';
+    if (v === true) return '1';
+    if (v === false) return '0';
+    return String(v);
+  };
+
+  const normConfig = (raw: any): Record<string, Record<string, string>> => {
+    const out: Record<string, Record<string, string>> = {};
+    for (const [mod, values] of Object.entries(raw ?? {})) {
+      if (!values || typeof values !== 'object') continue;
+      out[mod] = {};
+      for (const [k, v] of Object.entries(values as Record<string, unknown>)) {
+        out[mod][k] = normValue(v);
+      }
+    }
+    return out;
+  };
+
+  // Read the device's live configuration (module-by-module via the catalog).
+  ipcMain.handle('config:get-live', async (_e, deviceId: string) => {
     const device = queryOne(`SELECT d.*, c.username, c.password as cred_password
       FROM devices d LEFT JOIN credentials c ON d.credential_id = c.id WHERE d.id = ?`, [deviceId]);
     if (!device) throw new Error('Device not found');
-    const adapter = adapterRegistry.get(device.manufacturer) as any;
-    if (!adapter?.httpRequest) throw new Error('No adapter');
-    const proto = device.port === 443 ? 'https' : 'http';
-    const pw = device.cred_password ? decrypt(device.cred_password) : '';
-
-    // Login
-    const loginRes = await adapter.httpRequest(proto, device.ip_address, device.port, '/login.fcgi',
-      JSON.stringify({ login: device.username || 'admin', password: pw }), 10000);
-    if (!loginRes?.session) throw new Error('Authentication failed');
-    const s = loginRes.session;
-
-    // ── Read device configuration via load_objects.fcgi ──────────
-    // Note: get_configuration.fcgi returns empty {} on iDFace Max.
-    // All config data comes from object tables via load_objects.fcgi.
-    const config: Record<string, any> = {};
-
-    // All object tables from Control iD API docs that contain configuration
-    const objectTables = [
-      // Structure & Access (confirmed working)
-      'access_rules',          // Regras de acesso
-      'time_zones',            // Horários
-      'time_spans',            // Intervalos de horário (dias/horas)
-      'identification_rules',  // Regras de identificação
-      'groups',                // Grupos de acesso
-      'portals',               // Portais (áreas)
-      'portal_access_rules',   // Portal ↔ Regra de acesso
-      'group_access_rules',    // Grupo ↔ Regra de acesso
-      'areas',                 // Áreas
-      'actions',               // Scripts de ação
-      'portal_actions',        // Portal ↔ Ação
-      'script_instances',      // Instâncias de script
-      // Hardware
-      'alarm_zones',           // Zonas de alarme
-      'sec_boxs',              // MAE / Security Box
-      'scheduled_unlocks',     // Liberações agendadas
-      // Holidays
-      'holidays',              // Feriados
-    ];
-
-    for (const obj of objectTables) {
-      try {
-        const data = await adapter.httpRequest(proto, device.ip_address, device.port, '/load_objects.fcgi',
-          JSON.stringify({ object: obj }), 10000, s);
-        if (data && !data.error && Object.keys(data).length > 0) config[obj] = data;
-      } catch { /* skip */ }
-    }
-
-    // Device info + system_information (contains network, biometrics, etc)
-    const sysInfo = await adapter.httpRequest(proto, device.ip_address, device.port, '/system_information.fcgi', '{}', 10000, s);
-    config._device_info = {
-      model: sysInfo?.device_two_names ?? sysInfo?.device_name,
-      firmware: sysInfo?.version,
-      serial: sysInfo?.serial,
-    };
-    config.system_information = sysInfo;
-
-    // ── Try to read configuration modules by requesting specific known fields ──
-    // get_configuration.fcgi returns {} when called with empty body or {module: []}.
-    // Try requesting with specific field names from the API docs.
-    const configRequests: Record<string, any> = {
-      // Configurações Faciais
-      face_id: { face_id: { liveness_mode: '', limit_identification_to_display_region: '', min_detect_bounds_width: '', max_identified_duration: '' } },
-      face_module: { face_module: { light_threshold_led_activation: '' } },
-      led_white: { led_white: { brightness: '' } },
-      // Acesso => Mensagens / Tela
-      display: { display: { custom_auth_message: '', custom_deny_message: '', brightness: '', timeout: '', language: '' } },
-      // Sistema
-      general: { general: { local_identification: '', auto_reboot_hour: '', auto_reboot_minute: '', clear_expired_users: '', timezone: '', keep_user_image: '' } },
-      // Relés / GPIOs
-      relay: { relay: { relay1_enabled: '', relay1_timeout: '' } },
-      gpio: { gpio: { gpio1_mode: '', gpio1_enabled: '' } },
-      // SecBox
-      sec_box: { sec_box: {} },
-      // Online
-      online: { online: {} },
-      // Identificação
-      identifier: { identifier: {} },
-      // Monitor
-      monitor: { monitor: {} },
-    };
-
-    for (const [name, payload] of Object.entries(configRequests)) {
-      try {
-        const data = await adapter.httpRequest(proto, device.ip_address, device.port, '/get_configuration.fcgi',
-          JSON.stringify(payload), 10000, s);
-        // Check if any field has a non-empty value
-        const moduleData = data?.[name];
-        if (moduleData && typeof moduleData === 'object') {
-          const hasValues = Object.values(moduleData).some((v: any) => v !== '' && v !== null && v !== undefined);
-          if (hasValues) {
-            config[`_config_${name}`] = moduleData;
-          }
-        }
-      } catch { /* skip */ }
-    }
-
-    // Also try requesting the entire config as a single call with all modules
-    try {
-      const allModules: any = {};
-      for (const [name, payload] of Object.entries(configRequests)) {
-        Object.assign(allModules, payload);
-      }
-      const fullData = await adapter.httpRequest(proto, device.ip_address, device.port, '/get_configuration.fcgi',
-        JSON.stringify(allModules), 10000, s);
-      if (fullData && !fullData.error) {
-        for (const [k, v] of Object.entries(fullData)) {
-          if (v && typeof v === 'object' && Object.keys(v as any).length > 0) {
-            const hasValues = Object.values(v as any).some((val: any) => val !== '' && val !== null && val !== undefined);
-            if (hasValues && !config[`_config_${k}`]) {
-              config[`_config_${k}`] = v;
-            }
-          }
-        }
-      }
-    } catch { /* skip */ }
-
-    // Try reading logo/image if exists
-    try {
-      const logoData = await adapter.httpGet(proto, device.ip_address, device.port, '/get_user_image.fcgi?user_id=0', 10000, s);
-      if (logoData) {
-        config._logo = logoData;
-      }
-    } catch { /* skip */ }
-
-    await adapter.httpRequest(proto, device.ip_address, device.port, '/logout.fcgi', '{}', 5000, s).catch(() => {});
-
-    // Filter out empty and error entries
-    const cleanConfig: Record<string, any> = {};
-    for (const [key, value] of Object.entries(config)) {
-      if (value && typeof value === 'object' && !value.error && Object.keys(value).length > 0) {
-        cleanConfig[key] = value;
-      }
-    }
-
-
-    const id = uuid();
-    run(`INSERT INTO config_templates (id, name, manufacturer, model, config, created_at, updated_at) VALUES (?,?,?,?,?,?,?)`,
-      [id, templateName, device.manufacturer, device.model, JSON.stringify(cleanConfig), nowLocal(), nowLocal()]);
-    const ts = nowLocal();
-    run(`INSERT INTO audit_logs (id, action, category, device_id, device_name, details, severity, created_at) VALUES (?,?,?,?,?,?,?,?)`,
-      [uuid(), 'template_created', 'config', deviceId, device.name, `Template "${templateName}" from ${device.name}`, 'info', ts]);
-    return queryOne('SELECT * FROM config_templates WHERE id = ?', [id]);
+    const adapter = adapterRegistry.get(device.manufacturer);
+    if (!adapter) throw new Error('No adapter');
+    const conn: DeviceConnection = { ip: device.ip_address, port: device.port,
+      username: device.username || 'admin', password: device.cred_password ? decrypt(device.cred_password) : '' };
+    return normConfig(await adapter.getConfig(conn));
   });
 
-  ipcMain.handle('templates:create', (_e, data: any) => {
+  // Apply an edited configuration (the renderer sends only the changed fields).
+  ipcMain.handle('config:apply', async (_e, { deviceId, config }: { deviceId: string; config: Record<string, Record<string, string>> }) => {
+    const device = queryOne(`SELECT d.*, c.username, c.password as cred_password
+      FROM devices d LEFT JOIN credentials c ON d.credential_id = c.id WHERE d.id = ?`, [deviceId]);
+    if (!device) throw new Error('Device not found');
+    const adapter = adapterRegistry.get(device.manufacturer);
+    if (!adapter) throw new Error('No adapter');
+    const fieldCount = Object.values(config).reduce((n, m) => n + Object.keys(m).length, 0);
+    if (fieldCount === 0) return false;
+    const conn: DeviceConnection = { ip: device.ip_address, port: device.port,
+      username: device.username || 'admin', password: device.cred_password ? decrypt(device.cred_password) : '' };
+    const ok = await adapter.setConfig(conn, config);
+    run(`INSERT INTO audit_logs (id, action, category, device_id, device_name, details, severity, created_at) VALUES (?,?,?,?,?,?,?,?)`,
+      [uuid(), 'config_applied', 'config', deviceId, device.name,
+       `${fieldCount} setting(s) changed: ${Object.entries(config).map(([m, v]) => `${m}(${Object.keys(v).join(',')})`).join(' ')}`,
+       'warning', nowLocal()]);
+    if (!ok) throw new Error('Device rejected the configuration (no module was applied)');
+    return true;
+  });
+
+  ipcMain.handle('templates:list', () =>
+    query('SELECT id, name, description, created_at, updated_at FROM config_templates ORDER BY name ASC'));
+
+  ipcMain.handle('templates:get', (_e, id: string) => {
+    const t = queryOne('SELECT * FROM config_templates WHERE id = ?', [id]);
+    if (!t) return null;
+    return { ...t, config: JSON.parse(t.config || '{}') };
+  });
+
+  ipcMain.handle('templates:create', (_e, { name, description, config }: any) => {
+    if (!name) throw new Error('Template name is required');
     const id = uuid();
-    run(`INSERT INTO config_templates (id, name, manufacturer, model, config, created_at, updated_at) VALUES (?,?,?,?,?,?,?)`,
-      [id, data.name, data.manufacturer || 'controlid', data.model || null, JSON.stringify(data.config || {}), nowLocal(), nowLocal()]);
-    return queryOne('SELECT * FROM config_templates WHERE id = ?', [id]);
+    run(`INSERT INTO config_templates (id, name, description, config) VALUES (?,?,?,?)`,
+      [id, name, description || null, JSON.stringify(config || {})]);
+    return queryOne('SELECT id, name, description, created_at FROM config_templates WHERE id = ?', [id]);
+  });
+
+  ipcMain.handle('templates:update', (_e, { id, name, description, config }: any) => {
+    const existing = queryOne('SELECT * FROM config_templates WHERE id = ?', [id]);
+    if (!existing) throw new Error('Template not found');
+    run(`UPDATE config_templates SET name=?, description=?, config=?, updated_at='${nowLocal()}' WHERE id=?`,
+      [name ?? existing.name, description ?? existing.description,
+       config !== undefined ? JSON.stringify(config) : existing.config, id]);
+    return queryOne('SELECT id, name, description, updated_at FROM config_templates WHERE id = ?', [id]);
   });
 
   ipcMain.handle('templates:delete', (_e, id: string) => {
     run('DELETE FROM config_templates WHERE id = ?', [id]);
   });
 
-  ipcMain.handle('templates:get', (_e, id: string) => {
-    return queryOne('SELECT * FROM config_templates WHERE id = ?', [id]);
-  });
-
-  ipcMain.handle('templates:apply', async (_e, { templateId, deviceIds }: any) => {
+  // Apply a template's enforced fields to many devices (batch job).
+  ipcMain.handle('templates:apply', async (_e, { templateId, deviceIds }: { templateId: string; deviceIds: string[] }) => {
     const template = queryOne('SELECT * FROM config_templates WHERE id = ?', [templateId]);
     if (!template) throw new Error('Template not found');
-    const config = JSON.parse(template.config);
-    return jobService.createJob('batch_config', `Apply template "${template.name}" to ${deviceIds.length} devices`, deviceIds,
+    const config = JSON.parse(template.config || '{}');
+    const fieldCount = Object.values(config).reduce((n: number, m: any) => n + Object.keys(m || {}).length, 0);
+    if (fieldCount === 0) throw new Error('Template has no fields to apply');
+
+    return jobService.createJob('batch_config', `Apply template "${template.name}" to ${deviceIds.length} device(s)`, deviceIds,
       async (conn, device) => {
-        const adapter = adapterRegistry.get(device.manufacturer) as any;
-        if (!adapter?.httpRequest) throw new Error('No adapter');
-        if (device.manufacturer !== template.manufacturer) throw new Error(`Manufacturer mismatch`);
-        const proto = device.port === 443 ? 'https' : 'http';
-        const loginRes = await adapter.httpRequest(proto, device.ip_address, device.port, '/login.fcgi',
-          JSON.stringify({ login: conn.username, password: conn.password }), 10000);
-        if (!loginRes?.session) throw new Error('Auth failed');
-        const s = loginRes.session;
+        const adapter = adapterRegistry.get(device.manufacturer);
+        if (!adapter) throw new Error('No adapter');
+        const ok = await adapter.setConfig(conn, config);
+        if (!ok) throw new Error('Device rejected the configuration (no module was applied)');
+        run(`INSERT INTO audit_logs (id, action, category, device_id, device_name, details, severity, created_at) VALUES (?,?,?,?,?,?,?,?)`,
+          [uuid(), 'template_applied', 'config', device.id, device.name,
+           `Template "${template.name}" applied (${fieldCount} setting(s))`, 'warning', nowLocal()]);
+        return `Template applied (${fieldCount} setting(s))`;
+      }, getWindow());
+  });
 
-        let applied = 0;
+  // Compliance check: read each device's live config and diff it against the
+  // template's enforced fields. Non-compliant devices are reported as FAILED
+  // job items so they stand out in the Tasks view, with the differences in the
+  // item message.
+  ipcMain.handle('templates:compliance', async (_e, { templateId, deviceIds }: { templateId: string; deviceIds: string[] }) => {
+    const template = queryOne('SELECT * FROM config_templates WHERE id = ?', [templateId]);
+    if (!template) throw new Error('Template not found');
+    const expected = normConfig(JSON.parse(template.config || '{}'));
 
-        // Apply object tables via create_objects.fcgi
-        // Note: get/set_configuration.fcgi returns empty on iDFace Max
-        // All config is stored in object tables
-        const objectTables = ['access_rules', 'time_zones', 'time_spans',
-          'identification_rules', 'groups', 'portals', 'portal_access_rules',
-          'group_access_rules', 'areas', 'actions', 'portal_actions',
-          'alarm_zones', 'sec_boxs', 'scheduled_unlocks', 'holidays'];
-
-        for (const objType of objectTables) {
-          const objData = config[objType]?.[objType]; // { access_rules: { access_rules: [...] } }
-          if (Array.isArray(objData) && objData.length > 0) {
-            for (const item of objData) {
-              await adapter.httpRequest(proto, device.ip_address, device.port, '/create_objects.fcgi',
-                JSON.stringify({ object: objType, values: [item] }), 10000, s).catch(() => {});
-            }
-            applied++;
+    return jobService.createJob('health_check', `Compliance check "${template.name}" on ${deviceIds.length} device(s)`, deviceIds,
+      async (conn, device) => {
+        const adapter = adapterRegistry.get(device.manufacturer);
+        if (!adapter) throw new Error('No adapter');
+        const live = normConfig(await adapter.getConfig(conn));
+        const diffs: string[] = [];
+        for (const [mod, fields] of Object.entries(expected)) {
+          for (const [key, want] of Object.entries(fields)) {
+            if (want === '') continue; // not enforced
+            const got = live[mod]?.[key];
+            if (got === undefined) diffs.push(`${mod}.${key}: not reported (expected "${want}")`);
+            else if (got !== want) diffs.push(`${mod}.${key}: "${got}" (expected "${want}")`);
           }
         }
-
-        await adapter.httpRequest(proto, device.ip_address, device.port, '/logout.fcgi', '{}', 5000, s).catch(() => {});
-
-        const ts = nowLocal();
-        run(`INSERT INTO audit_logs (id, action, category, device_id, device_name, details, severity, created_at) VALUES (?,?,?,?,?,?,?,?)`,
-          [uuid(), 'template_applied', 'config', device.id, device.name, `Template "${template.name}" applied (${applied} sections)`, 'info', ts]);
-        return `Template applied (${applied} sections)`;
+        if (diffs.length > 0) {
+          const summary = diffs.slice(0, 8).join('; ') + (diffs.length > 8 ? ` …+${diffs.length - 8} more` : '');
+          run(`INSERT INTO audit_logs (id, action, category, device_id, device_name, details, severity, created_at) VALUES (?,?,?,?,?,?,?,?)`,
+            [uuid(), 'compliance_failed', 'config', device.id, device.name,
+             `${diffs.length} difference(s) vs template "${template.name}": ${summary}`, 'warning', nowLocal()]);
+          throw new Error(`${diffs.length} difference(s): ${summary}`);
+        }
+        return 'Compliant';
       }, getWindow());
   });
 
@@ -782,7 +975,7 @@ export function registerIpcHandlers(getWindow: () => BrowserWindow | null): void
       list.push(d);
       versions.set(v, list);
     });
-    const sorted = Array.from(versions.entries()).sort((a, b) => b[0].localeCompare(a[0]));
+    const sorted = Array.from(versions.entries()).sort((a, b) => b[0].localeCompare(a[0], undefined, { numeric: true }));
     const latest = sorted[0]?.[0] !== 'Unknown' ? sorted[0]?.[0] : sorted[1]?.[0] ?? null;
     return {
       total: devices.length,
@@ -811,66 +1004,147 @@ export function registerIpcHandlers(getWindow: () => BrowserWindow | null): void
       }, getWindow());
   });
 
+  // Reinstall firmware via the device's Web Recovery mode. Devices are
+  // processed one at a time by the job queue (a natural staggered rollout —
+  // each device is offline for several minutes while it runs).
+  ipcMain.handle('firmware:repair', async (_e, { deviceIds, factory }: { deviceIds: string[]; factory?: boolean }) => {
+    return jobService.createJob('firmware_upgrade',
+      `${factory ? 'Factory reinstall' : 'Repair'} firmware on ${deviceIds.length} device(s)`, deviceIds,
+      async (conn, device) => {
+        const adapter = adapterRegistry.get(device.manufacturer);
+        if (!adapter?.repairFirmware) throw new Error('Adapter does not support firmware repair');
+        run(`UPDATE devices SET status='syncing', updated_at='${nowLocal()}' WHERE id=?`, [device.id]);
+        try {
+          const result = await adapter.repairFirmware(conn, { factory: !!factory });
+          if (result.firmwareVersion) {
+            run(`UPDATE devices SET status='online', firmware_version=?, last_heartbeat='${nowLocal()}', updated_at='${nowLocal()}' WHERE id=?`,
+              [result.firmwareVersion, device.id]);
+          } else {
+            run(`UPDATE devices SET status='offline', updated_at='${nowLocal()}' WHERE id=?`, [device.id]);
+          }
+          run(`INSERT INTO audit_logs (id, action, category, device_id, device_name, details, severity, created_at) VALUES (?,?,?,?,?,?,?,?)`,
+            [uuid(), factory ? 'firmware_factory_reinstall' : 'firmware_repair', 'firmware', device.id, device.name,
+             result.message, factory ? 'critical' : 'warning', nowLocal()]);
+          return result.message;
+        } catch (err: any) {
+          run(`UPDATE devices SET status='error', updated_at='${nowLocal()}' WHERE id=?`, [device.id]);
+          run(`INSERT INTO audit_logs (id, action, category, device_id, device_name, details, severity, created_at) VALUES (?,?,?,?,?,?,?,?)`,
+            [uuid(), 'firmware_repair_failed', 'firmware', device.id, device.name,
+             err?.message || 'Unknown error', 'error', nowLocal()]);
+          throw err;
+        }
+      }, getWindow());
+  });
+
+  // Manual recovery-mode control: check state, boot into recovery, boot back
+  // to normal. 'exit' needs no credential (the recovery web has no auth).
+  ipcMain.handle('devices:recovery', async (_e, { id, action }: { id: string; action: 'status' | 'enter' | 'exit' }) => {
+    const device = queryOne(`SELECT d.*, c.username, c.password as cred_password
+      FROM devices d LEFT JOIN credentials c ON d.credential_id = c.id WHERE d.id = ?`, [id]);
+    if (!device) throw new Error('Device not found');
+    const adapter = adapterRegistry.get(device.manufacturer);
+    if (!adapter?.isInRecovery) throw new Error('Adapter does not support recovery mode');
+
+    if (action === 'status') {
+      return { inRecovery: await adapter.isInRecovery(device.ip_address) };
+    }
+    if (action === 'enter') {
+      if (!adapter.enterRecovery) throw new Error('Adapter does not support recovery mode');
+      const conn: DeviceConnection = { ip: device.ip_address, port: device.port,
+        username: device.username || 'admin', password: device.cred_password ? decrypt(device.cred_password) : '' };
+      await adapter.enterRecovery(conn);
+      run(`UPDATE devices SET status='offline', updated_at='${nowLocal()}' WHERE id=?`, [id]);
+      run(`INSERT INTO audit_logs (id, action, category, device_id, device_name, details, severity, created_at) VALUES (?,?,?,?,?,?,?,?)`,
+        [uuid(), 'recovery_enter', 'firmware', id, device.name, 'Device rebooted into recovery mode', 'warning', nowLocal()]);
+      return { ok: true };
+    }
+    if (!adapter.exitRecovery) throw new Error('Adapter does not support recovery mode');
+    if (!(await adapter.isInRecovery(device.ip_address))) {
+      throw new Error('Device is not in recovery mode (or is unreachable on port 80)');
+    }
+    await adapter.exitRecovery(device.ip_address);
+    run(`INSERT INTO audit_logs (id, action, category, device_id, device_name, details, severity, created_at) VALUES (?,?,?,?,?,?,?,?)`,
+      [uuid(), 'recovery_exit', 'firmware', id, device.name, 'Normal reboot sent from recovery mode', 'info', nowLocal()]);
+    return { ok: true };
+  });
+
   // ─── Network Configuration ──────────────────────────────────────
+
+  ipcMain.handle('devices:finish-setup', async (_e, { id, country }: any) => {
+    const device = queryOne(`SELECT d.*, c.username, c.password as cred_password
+      FROM devices d LEFT JOIN credentials c ON d.credential_id = c.id WHERE d.id = ?`, [id]);
+    if (!device) throw new Error('Device not found');
+    const adapter = adapterRegistry.get(device.manufacturer) as any;
+    if (!adapter?.finishSetup) throw new Error('Adapter does not support setup completion');
+
+    const countryCode = String(country || 'BR').toUpperCase();
+    const LANG_BY_COUNTRY: Record<string, string> = { BR: 'pt_BR', PT: 'pt_BR', US: 'en_US', GB: 'en_US', ES: 'spa_SPA', FR: 'fr_FR', DE: 'de_DE' };
+    const language = LANG_BY_COUNTRY[countryCode] || 'pt_BR';
+
+    const conn: DeviceConnection = { ip: device.ip_address, port: device.port,
+      username: device.username || 'admin', password: device.cred_password ? decrypt(device.cred_password) : '' };
+    await adapter.finishSetup(conn, { language, countryCode });
+
+    run(`INSERT INTO audit_logs (id, action, category, device_id, device_name, details, severity, created_at) VALUES (?,?,?,?,?,?,?,?)`,
+      [uuid(), 'setup_completed', 'device', id, device.name,
+       `Initial setup completed remotely (${language}/${countryCode})`, 'info', nowLocal()]);
+    return { success: true };
+  });
+
+  ipcMain.handle('devices:get-network', async (_e, id: string) => {
+    const device = queryOne(`SELECT d.*, c.username, c.password as cred_password
+      FROM devices d LEFT JOIN credentials c ON d.credential_id = c.id WHERE d.id = ?`, [id]);
+    if (!device) throw new Error('Device not found');
+    const adapter = adapterRegistry.get(device.manufacturer) as any;
+    if (!adapter?.getNetwork) throw new Error('Adapter does not support network configuration');
+    const conn: DeviceConnection = { ip: device.ip_address, port: device.port,
+      username: device.username || 'admin', password: device.cred_password ? decrypt(device.cred_password) : '' };
+    return adapter.getNetwork(conn);
+  });
 
   ipcMain.handle('devices:set-network', async (_e, { id, network }: any) => {
     const device = queryOne(`SELECT d.*, c.username, c.password as cred_password
       FROM devices d LEFT JOIN credentials c ON d.credential_id = c.id WHERE d.id = ?`, [id]);
     if (!device) throw new Error('Device not found');
     const adapter = adapterRegistry.get(device.manufacturer) as any;
-    if (!adapter?.httpRequest) throw new Error('No adapter');
-    const proto = device.port === 443 ? 'https' : 'http';
-    const conn_password = device.cred_password ? decrypt(device.cred_password) : '';
+    if (!adapter?.setNetwork) throw new Error('Adapter does not support network configuration');
 
-    // Login
-    const loginRes = await adapter.httpRequest(proto, device.ip_address, device.port, '/login.fcgi',
-      JSON.stringify({ login: device.username || 'admin', password: conn_password }), 10000);
-    if (!loginRes?.session) throw new Error('Authentication failed');
+    const conn: DeviceConnection = { ip: device.ip_address, port: device.port,
+      username: device.username || 'admin', password: device.cred_password ? decrypt(device.cred_password) : '' };
 
-    // First read current network config to understand the API structure
-    const currentConfig = await adapter.httpRequest(proto, device.ip_address, device.port, '/get_configuration.fcgi',
-      '{}', 10000, loginRes.session);
+    // Overlay applied by the adapter on top of the device's current config —
+    // it sends the full object the device web UI sends (field names verified
+    // against fw 8.7.3: DNS is primary_dns/secondary_dns, flag is dhcp_enabled).
+    const payload: Record<string, unknown> = network.dhcp
+      ? { dhcp_enabled: true }
+      : {
+          dhcp_enabled: false,
+          ip: network.ip,
+          netmask: network.netmask,
+          gateway: network.gateway,
+          ...(network.primary_dns ? { primary_dns: network.primary_dns } : {}),
+          ...(network.secondary_dns ? { secondary_dns: network.secondary_dns } : {}),
+        };
 
-    // Also read system_information to see network fields
-    const sysInfo = await adapter.httpRequest(proto, device.ip_address, device.port, '/system_information.fcgi',
-      '{}', 10000, loginRes.session);
-
-    // Build network config - try the exact structure from system_information
-    const netConfig: any = {};
-    if (network.dhcp) {
-      netConfig.dhcp_enabled = true;
-    } else {
-      netConfig.dhcp_enabled = false;
-      netConfig.ip = network.ip;
-      netConfig.netmask = network.netmask;
-      netConfig.gateway = network.gateway;
-      if (sysInfo?.network?.primary_dns) netConfig.primary_dns = sysInfo.network.primary_dns;
+    try {
+      await adapter.setNetwork(conn, payload);
+    } catch (e: any) {
+      if (/invalid access level/i.test(String(e?.message || ''))) {
+        throw new Error('Device rejected the network change: it still has factory-default credentials (first-login state). Select the device and use "Set Credentials" to define a new login/password, then try again.');
+      }
+      throw e;
     }
 
-    // Try Method 1: set_configuration with { network: { ... } }
-    const result1 = await adapter.httpRequest(proto, device.ip_address, device.port, '/set_configuration.fcgi',
-      JSON.stringify({ network: netConfig }), 10000, loginRes.session);
-
-    // Try Method 2: set_configuration with flat fields (some firmwares use this)
-    const result2 = await adapter.httpRequest(proto, device.ip_address, device.port, '/set_configuration.fcgi',
-      JSON.stringify(netConfig), 10000, loginRes.session);
-
-    // Verify: read config again to check if it changed
-    const verifyInfo = await adapter.httpRequest(proto, device.ip_address, device.port, '/system_information.fcgi',
-      '{}', 10000, loginRes.session);
-
-    // Reboot device to apply network changes
-    await adapter.httpRequest(proto, device.ip_address, device.port, '/reboot.fcgi', '{}', 10000, loginRes.session).catch(() => {});
-
-    // Update local DB
-    const newIp = network.ip || device.ip_address;
+    // Update local DB. On DHCP the device may come back on a different IP —
+    // the heartbeat MAC-tracking will relocate it automatically.
+    const newIp = network.dhcp ? device.ip_address : (network.ip || device.ip_address);
     run(`UPDATE devices SET ip_address=?, dhcp_enabled=?, status='offline', updated_at='${nowLocal()}' WHERE id=?`,
-      [network.dhcp ? device.ip_address : newIp, network.dhcp ? 1 : 0, id]);
-    run(`INSERT INTO audit_logs (id, action, category, device_id, device_name, details, severity) VALUES (?,?,?,?,?,?,?)`,
+      [newIp, network.dhcp ? 1 : 0, id]);
+    run(`INSERT INTO audit_logs (id, action, category, device_id, device_name, details, severity, created_at) VALUES (?,?,?,?,?,?,?,?)`,
       [uuid(), 'network_changed', 'device', id, device.name,
-       network.dhcp ? 'Switched to DHCP' : `Static IP: ${newIp}, Mask: ${network.netmask}, GW: ${network.gateway}`, 'warning']);
+       network.dhcp ? 'Switched to DHCP' : `Static IP: ${newIp}, Mask: ${network.netmask}, GW: ${network.gateway}`, 'warning', nowLocal()]);
 
-    return { success: true, rebooting: true };
+    return { success: true };
   });
 
   // ─── Shell & Dialogs ────────────────────────────────────────────
@@ -881,10 +1155,19 @@ export function registerIpcHandlers(getWindow: () => BrowserWindow | null): void
     }
   });
 
+  let promptCounter = 0;
   ipcMain.handle('dialog:prompt', async (_e, { title, message, defaultValue }: any) => {
     const win = getWindow();
     if (!win) return null;
+    // Unique channel per prompt so concurrent prompts don't cross-talk
+    const resultChannel = `prompt-result-${++promptCounter}`;
     // Use a simple input dialog via BrowserWindow
+    // Escape ALL interpolated values: this window has nodeIntegration enabled,
+    // so any unescaped HTML in title/message/defaultValue would be XSS→RCE
+    // (e.g. a device name or a previous prompt's answer echoed into the message).
+    const esc = (s: any) => String(s ?? '')
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
     return new Promise<string | null>((resolve) => {
       const prompt = new BrowserWindow({
         width: 450, height: 200, parent: win, modal: true,
@@ -899,20 +1182,20 @@ export function registerIpcHandlers(getWindow: () => BrowserWindow | null): void
         button{padding:6px 16px;border:none;border-radius:6px;cursor:pointer;font-size:13px}
         .ok{background:#4f46e5;color:#fff} .cancel{background:#334155;color:#94a3b8}
         </style></head><body>
-        <p style="font-size:14px;margin:0 0 4px">${title || 'Input'}</p>
-        <p style="font-size:12px;color:#94a3b8;margin:0 0 8px">${message || ''}</p>
-        <input id="v" value="${(defaultValue || '').replace(/"/g, '&quot;')}" autofocus />
+        <p style="font-size:14px;margin:0 0 4px">${esc(title || 'Input')}</p>
+        <p style="font-size:12px;color:#94a3b8;margin:0 0 8px">${esc(message || '')}</p>
+        <input id="v" value="${esc(defaultValue || '')}" autofocus />
         <div class="btns">
-          <button class="cancel" onclick="require('electron').ipcRenderer.send('prompt-result',null);window.close()">Cancel</button>
-          <button class="ok" onclick="require('electron').ipcRenderer.send('prompt-result',document.getElementById('v').value);window.close()">OK</button>
+          <button class="cancel" onclick="require('electron').ipcRenderer.send('${resultChannel}',null);window.close()">Cancel</button>
+          <button class="ok" onclick="require('electron').ipcRenderer.send('${resultChannel}',document.getElementById('v').value);window.close()">OK</button>
         </div>
-        <script>document.getElementById('v').addEventListener('keydown',e=>{if(e.key==='Enter'){require('electron').ipcRenderer.send('prompt-result',document.getElementById('v').value);window.close()}if(e.key==='Escape'){require('electron').ipcRenderer.send('prompt-result',null);window.close()}})</script>
+        <script>document.getElementById('v').addEventListener('keydown',e=>{if(e.key==='Enter'){require('electron').ipcRenderer.send('${resultChannel}',document.getElementById('v').value);window.close()}if(e.key==='Escape'){require('electron').ipcRenderer.send('${resultChannel}',null);window.close()}})</script>
         </body></html>`;
       prompt.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`);
       const { ipcMain: ipc2 } = require('electron');
-      const handler = (_: any, val: string | null) => { resolve(val); prompt.close(); ipc2.removeListener('prompt-result', handler); };
-      ipc2.on('prompt-result', handler);
-      prompt.on('closed', () => { ipc2.removeListener('prompt-result', handler); resolve(null); });
+      const handler = (_: any, val: string | null) => { resolve(val); prompt.close(); ipc2.removeListener(resultChannel, handler); };
+      ipc2.on(resultChannel, handler);
+      prompt.on('closed', () => { ipc2.removeListener(resultChannel, handler); resolve(null); });
     });
   });
 
@@ -924,6 +1207,38 @@ export function registerIpcHandlers(getWindow: () => BrowserWindow | null): void
       title: 'Confirm', message,
     });
     return result.response === 1;
+  });
+
+  ipcMain.handle('devices:download-logs', async (_e, { id, kind }: { id: string; kind: 'diagnostic' | 'audit' }) => {
+    const device = queryOne(`SELECT d.*, c.username, c.password as cred_password
+      FROM devices d LEFT JOIN credentials c ON d.credential_id = c.id WHERE d.id = ?`, [id]);
+    if (!device) throw new Error('Device not found');
+    const adapter = adapterRegistry.get(device.manufacturer) as any;
+    if (!adapter?.downloadLog) throw new Error('Adapter does not support log download');
+
+    const conn: DeviceConnection = { ip: device.ip_address, port: device.port,
+      username: device.username || 'admin', password: device.cred_password ? decrypt(device.cred_password) : '' };
+    const text = await adapter.downloadLog(conn, kind);
+
+    const win = getWindow();
+    if (!win) return { cancelled: true };
+    const safe = (s: any) => String(s ?? '').replace(/[^\w.-]/g, '_');
+    const stamp = nowLocal().replace(/[: ]/g, '-');
+    const prefix = kind === 'audit' ? 'Audit_logs' : 'ACFW_log';
+    const defaultName = `${prefix}_${safe(device.model || 'device')}_${safe(device.serial_number || device.ip_address)}_${stamp}.txt`;
+    const { filePath } = await dialog.showSaveDialog(win, {
+      title: kind === 'audit' ? 'Save Audit Logs' : 'Save Diagnostic Logs',
+      defaultPath: defaultName,
+      filters: [{ name: 'Text', extensions: ['txt'] }],
+    });
+    if (!filePath) return { cancelled: true };
+
+    fs.writeFileSync(filePath, text, 'utf-8');
+    run(`INSERT INTO audit_logs (id, action, category, device_id, device_name, details, severity, created_at) VALUES (?,?,?,?,?,?,?,?)`,
+      [uuid(), 'logs_downloaded', 'device', id, device.name,
+       `${kind === 'audit' ? 'Audit' : 'Diagnostic'} logs saved (${text.length} bytes)`, 'info', nowLocal()]);
+    shell.showItemInFolder(filePath);
+    return { saved: filePath };
   });
 
   // ─── Export ────────────────────────────────────────────────────

@@ -1,6 +1,25 @@
 import { useState, useEffect } from 'react';
 import { ipc } from '../hooks/useIpc';
 import { fmtDate } from '../utils/date';
+import { Badge, Card, Eyebrow } from '../components/ui';
+
+function StatTile({ tone, label, value }: { tone: string; label: string; value: number }) {
+  const tones: Record<string, { bg: string; fg: string }> = {
+    info: { bg: 'var(--sr-info-bg)', fg: 'var(--sr-info-fg)' },
+    exec: { bg: 'var(--sr-exec-bg)', fg: 'var(--sr-exec-fg)' },
+    pend: { bg: 'var(--sr-pend-bg)', fg: 'var(--sr-pend-fg)' },
+    warn: { bg: 'var(--sr-warn-bg)', fg: 'var(--sr-warn-fg)' },
+    aguard: { bg: 'var(--sr-aguard-bg)', fg: 'var(--sr-aguard-fg)' },
+    jrny: { bg: 'var(--sr-jrny-bg)', fg: 'var(--sr-jrny-fg)' },
+  };
+  const t = tones[tone] || tones.info;
+  return (
+    <div style={{ borderRadius: 16, padding: '14px 16px', background: t.bg, border: '1px solid rgba(0,0,0,.05)' }}>
+      <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: '1.1px', textTransform: 'uppercase', color: t.fg, opacity: .8 }}>{label}</div>
+      <div style={{ fontSize: 28, fontWeight: 800, lineHeight: 1.1, marginTop: 6, fontVariantNumeric: 'tabular-nums', letterSpacing: '-.6px', color: t.fg }}>{value}</div>
+    </div>
+  );
+}
 
 export default function DashboardPage() {
   const [stats, setStats] = useState<any>(null);
@@ -16,10 +35,11 @@ export default function DashboardPage() {
     return () => clearInterval(interval);
   }, []);
 
-  if (!stats) return <div className="p-6 text-slate-500">Loading...</div>;
+  if (!stats) return <div style={{ padding: '18px 28px', color: 'var(--text-muted)' }}>Loading…</div>;
 
   // Security analysis
   const noCredential = devices.filter(d => !d.credential_id);
+  const factoryCreds = devices.filter(d => d.factory_credentials === 1);
   const noHttps = devices.filter(d => !d.https_enabled && d.status === 'online');
   const firmwareVersions = new Map<string, any[]>();
   devices.forEach(d => {
@@ -29,139 +49,125 @@ export default function DashboardPage() {
       firmwareVersions.set(d.firmware_version, list);
     }
   });
-  const uniqueFirmwares = Array.from(firmwareVersions.entries()).sort((a, b) => b[0].localeCompare(a[0]));
+  const uniqueFirmwares = Array.from(firmwareVersions.entries()).sort((a, b) => b[0].localeCompare(a[0], undefined, { numeric: true }));
   const latestFirmware = uniqueFirmwares[0]?.[0];
   const outdatedFirmware = devices.filter(d => d.firmware_version && d.firmware_version !== latestFirmware);
 
-  const statusCards = [
-    { label: 'Total Devices', value: stats.devices.total, color: 'bg-slate-600', textColor: 'text-white' },
-    { label: 'Online', value: stats.devices.online, color: 'bg-emerald-600', textColor: 'text-emerald-50' },
-    { label: 'Offline', value: stats.devices.offline, color: 'bg-red-600', textColor: 'text-red-50' },
-    { label: 'Error', value: stats.devices.error, color: 'bg-amber-600', textColor: 'text-amber-50' },
-    { label: 'Unknown', value: stats.devices.unknown, color: 'bg-slate-700', textColor: 'text-slate-300' },
-    { label: 'Jobs Running', value: stats.jobsRunning, color: 'bg-brand-600', textColor: 'text-brand-50' },
-  ];
-
   const securityIssues = [
+    ...factoryCreds.length > 0 ? [{ severity: 'critical' as const, text: `${factoryCreds.length} device(s) still using factory credentials (admin/admin)`, detail: factoryCreds.map(d => d.name).join(', ') }] : [],
     ...noCredential.length > 0 ? [{ severity: 'warning' as const, text: `${noCredential.length} device(s) without credentials`, detail: noCredential.map(d => d.name).join(', ') }] : [],
     ...noHttps.length > 0 ? [{ severity: 'info' as const, text: `${noHttps.length} device(s) without HTTPS`, detail: noHttps.map(d => d.name).join(', ') }] : [],
     ...outdatedFirmware.length > 0 ? [{ severity: 'warning' as const, text: `${outdatedFirmware.length} device(s) with outdated firmware (latest: ${latestFirmware})`, detail: outdatedFirmware.map(d => `${d.name}: ${d.firmware_version}`).join(', ') }] : [],
   ];
+  const SEVERITY_MARK: Record<string, string> = {
+    critical: 'var(--sr-pend-m)', error: 'var(--sr-pend-m)', warning: 'var(--sr-warn-m)', info: 'var(--sr-info-m)',
+  };
 
   const onlinePercent = stats.devices.total > 0 ? Math.round((stats.devices.online / stats.devices.total) * 100) : 0;
 
   return (
-    <div className="p-6 space-y-6">
-      <h1 className="text-xl font-bold text-white">Dashboard</h1>
-
-      {/* Status cards */}
-      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
-        {statusCards.map((c) => (
-          <div key={c.label} className={`${c.color} rounded-xl p-4`}>
-            <p className={`text-xs ${c.textColor} opacity-80 uppercase tracking-wide`}>{c.label}</p>
-            <p className={`text-3xl font-bold ${c.textColor} mt-1`}>{c.value}</p>
-          </div>
-        ))}
+    <div style={{ padding: '18px 28px 28px', display: 'flex', flexDirection: 'column', gap: 16 }}>
+      {/* Status tiles */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(6, 1fr)', gap: 14 }}>
+        <StatTile tone="info" label="Total devices" value={stats.devices.total} />
+        <StatTile tone="exec" label="Online" value={stats.devices.online} />
+        <StatTile tone="pend" label="Offline" value={stats.devices.offline} />
+        <StatTile tone="warn" label="Error" value={stats.devices.error} />
+        <StatTile tone="aguard" label="Unknown" value={stats.devices.unknown} />
+        <StatTile tone="jrny" label="Jobs running" value={stats.jobsRunning} />
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0,1fr))', gap: 14 }}>
         {/* Fleet health */}
-        <div className="bg-slate-800 rounded-xl border border-slate-700 p-5">
-          <h2 className="text-sm font-semibold text-slate-300 mb-4">Fleet Health</h2>
-          <div className="flex items-center gap-6">
-            <div className="relative w-24 h-24">
-              <svg viewBox="0 0 36 36" className="w-24 h-24 -rotate-90">
-                <circle cx="18" cy="18" r="15.9" fill="none" stroke="#1e293b" strokeWidth="3" />
-                <circle cx="18" cy="18" r="15.9" fill="none" stroke="#10b981" strokeWidth="3"
+        <Card style={{ padding: '16px 18px' }}>
+          <Eyebrow style={{ marginBottom: 12 }}>Fleet health</Eyebrow>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 24 }}>
+            <div style={{ position: 'relative', width: 96, height: 96 }}>
+              <svg viewBox="0 0 36 36" width={96} height={96} style={{ transform: 'rotate(-90deg)' }}>
+                <circle cx={18} cy={18} r={15.9} fill="none" stroke="var(--surface-sunken)" strokeWidth={3} />
+                <circle cx={18} cy={18} r={15.9} fill="none" stroke="var(--sr-exec-m)" strokeWidth={3}
                   strokeDasharray={`${onlinePercent} ${100 - onlinePercent}`} strokeLinecap="round" />
               </svg>
-              <div className="absolute inset-0 flex items-center justify-center">
-                <span className="text-xl font-bold text-white">{onlinePercent}%</span>
+              <div style={{ position: 'absolute', inset: 0, display: 'grid', placeItems: 'center' }}>
+                <span style={{ fontSize: 19, fontWeight: 800, fontVariantNumeric: 'tabular-nums', color: 'var(--text-strong)' }}>{onlinePercent}%</span>
               </div>
             </div>
-            <div className="space-y-2 text-sm">
-              <div className="flex items-center gap-2">
-                <span className="w-3 h-3 rounded-full bg-emerald-500" />
-                <span className="text-slate-400">Online: {stats.devices.online}</span>
-              </div>
-              <div className="flex items-center gap-2">
-                <span className="w-3 h-3 rounded-full bg-red-500" />
-                <span className="text-slate-400">Offline: {stats.devices.offline}</span>
-              </div>
-              <div className="flex items-center gap-2">
-                <span className="w-3 h-3 rounded-full bg-amber-500" />
-                <span className="text-slate-400">Error: {stats.devices.error}</span>
-              </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8, fontSize: 12.5 }}>
+              {([['var(--sr-exec-m)', `Online: ${stats.devices.online}`],
+                 ['var(--sr-pend-m)', `Offline: ${stats.devices.offline}`],
+                 ['var(--sr-warn-m)', `Error: ${stats.devices.error}`]] as const).map(([c, label]) => (
+                <div key={label} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <span style={{ width: 10, height: 10, borderRadius: '50%', background: c }} />
+                  <span style={{ color: 'var(--text-muted)', fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>{label}</span>
+                </div>
+              ))}
             </div>
           </div>
           {stats.lastScanAt && (
-            <p className="text-xs text-slate-600 mt-4">Last network scan: {fmtDate(stats.lastScanAt)}</p>
+            <p style={{ fontSize: 11.5, color: 'var(--text-muted)', margin: '14px 0 0' }}>Last network scan: {fmtDate(stats.lastScanAt)}</p>
           )}
-        </div>
+        </Card>
 
         {/* Security posture */}
-        <div className="bg-slate-800 rounded-xl border border-slate-700 p-5">
-          <h2 className="text-sm font-semibold text-slate-300 mb-4">Security Posture</h2>
+        <Card style={{ padding: '16px 18px' }}>
+          <Eyebrow style={{ marginBottom: 12 }}>Security posture</Eyebrow>
           {securityIssues.length === 0 ? (
-            <div className="flex items-center gap-3 text-emerald-400">
-              <span className="text-2xl">✓</span>
-              <span className="text-sm">All devices are properly configured</span>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, color: 'var(--sr-exec-fg)' }}>
+              <span style={{ fontSize: 20 }}>✓</span>
+              <span style={{ fontSize: 13, fontWeight: 600 }}>All devices are properly configured</span>
             </div>
           ) : (
-            <div className="space-y-3">
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
               {securityIssues.map((issue, i) => (
-                <div key={i} className="flex items-start gap-2">
-                  <span className={`w-2 h-2 rounded-full mt-1.5 flex-shrink-0 ${
-                    issue.severity === 'warning' ? 'bg-amber-500' : 'bg-blue-500'
-                  }`} />
-                  <div>
-                    <p className="text-sm text-slate-300">{issue.text}</p>
-                    <p className="text-xs text-slate-600 mt-0.5 truncate max-w-sm" title={issue.detail}>{issue.detail}</p>
+                <div key={i} style={{ display: 'flex', alignItems: 'flex-start', gap: 8 }}>
+                  <span style={{ width: 8, height: 8, borderRadius: '50%', marginTop: 5, flex: 'none', background: SEVERITY_MARK[issue.severity] }} />
+                  <div style={{ minWidth: 0 }}>
+                    <p style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--text)', margin: 0 }}>{issue.text}</p>
+                    <p title={issue.detail} style={{ fontSize: 11.5, color: 'var(--text-muted)', margin: '2px 0 0', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: 420 }}>{issue.detail}</p>
                   </div>
                 </div>
               ))}
             </div>
           )}
-        </div>
+        </Card>
 
         {/* Firmware versions */}
-        <div className="bg-slate-800 rounded-xl border border-slate-700 p-5">
-          <h2 className="text-sm font-semibold text-slate-300 mb-4">Firmware Versions</h2>
+        <Card style={{ padding: '16px 18px' }}>
+          <Eyebrow style={{ marginBottom: 12 }}>Firmware versions</Eyebrow>
           {uniqueFirmwares.length === 0 ? (
-            <p className="text-sm text-slate-600">No firmware data. Run Test Connection on devices.</p>
+            <p style={{ fontSize: 12.5, color: 'var(--text-muted)', margin: 0 }}>No firmware data. Run Test connection on devices.</p>
           ) : (
-            <div className="space-y-2">
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
               {uniqueFirmwares.map(([version, devs]) => (
-                <div key={version} className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <span className={`w-2 h-2 rounded-full ${version === latestFirmware ? 'bg-emerald-500' : 'bg-amber-500'}`} />
-                    <span className="text-sm text-white font-mono">{version}</span>
-                    {version === latestFirmware && <span className="text-xs text-emerald-400">(latest)</span>}
+                <div key={version} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <span style={{ width: 8, height: 8, borderRadius: '50%', background: version === latestFirmware ? 'var(--sr-exec-m)' : 'var(--sr-warn-m)' }} />
+                    <span style={{ fontSize: 12.5, fontWeight: 700, fontVariantNumeric: 'tabular-nums', color: 'var(--text)' }}>{version}</span>
+                    {version === latestFirmware && <Badge tone="exec">Latest</Badge>}
                   </div>
-                  <span className="text-xs text-slate-500">{devs.length} device(s)</span>
+                  <span style={{ fontSize: 11.5, color: 'var(--text-muted)', fontVariantNumeric: 'tabular-nums' }}>{devs.length} device(s)</span>
                 </div>
               ))}
             </div>
           )}
-        </div>
+        </Card>
 
-        {/* Recent alerts */}
-        <div className="bg-slate-800 rounded-xl border border-slate-700 p-5">
-          <h2 className="text-sm font-semibold text-slate-300 mb-4">Recent Activity</h2>
-          <div className="space-y-2 max-h-48 overflow-auto">
-            {stats.recentAlerts.length === 0 && <p className="text-sm text-slate-600">No recent activity</p>}
+        {/* Recent activity */}
+        <Card style={{ padding: '16px 18px' }}>
+          <Eyebrow style={{ marginBottom: 12 }}>Recent activity</Eyebrow>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 7, maxHeight: 192, overflowY: 'auto' }}>
+            {stats.recentAlerts.length === 0 && <p style={{ fontSize: 12.5, color: 'var(--text-muted)', margin: 0 }}>No recent activity</p>}
             {stats.recentAlerts.map((a: any) => (
-              <div key={a.id} className="flex items-center gap-2 text-xs">
-                <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${
-                  a.severity === 'critical' ? 'bg-red-500' : a.severity === 'error' ? 'bg-red-400' :
-                  a.severity === 'warning' ? 'bg-amber-400' : 'bg-blue-400'
-                }`} />
-                <span className="text-slate-400 flex-1 truncate">{a.action}{a.device_name ? `: ${a.device_name}` : ''}</span>
-                <span className="text-slate-600 flex-shrink-0">{fmtDate(a.created_at)}</span>
+              <div key={a.id} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12 }}>
+                <span style={{ width: 6, height: 6, borderRadius: '50%', flex: 'none', background: SEVERITY_MARK[a.severity] || 'var(--sr-info-m)' }} />
+                <span style={{ color: 'var(--text)', fontWeight: 600, flex: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                  {a.action}{a.device_name ? `: ${a.device_name}` : ''}
+                </span>
+                <span style={{ color: 'var(--text-muted)', flex: 'none', fontSize: 11.5, fontVariantNumeric: 'tabular-nums' }}>{fmtDate(a.created_at)}</span>
               </div>
             ))}
           </div>
-        </div>
+        </Card>
       </div>
     </div>
   );

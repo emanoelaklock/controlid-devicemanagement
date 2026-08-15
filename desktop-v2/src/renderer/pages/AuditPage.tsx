@@ -1,10 +1,18 @@
 import { useState, useEffect } from 'react';
 import { ipc } from '../hooks/useIpc';
 import { fmtDate } from '../utils/date';
+import { Button, Card, Select, StateBlock } from '../components/ui';
 
-const SEVERITY_COLORS: Record<string, string> = {
-  info: 'bg-blue-500', warning: 'bg-amber-500', error: 'bg-red-500', critical: 'bg-red-600',
+const SEVERITY_MARK: Record<string, string> = {
+  info: 'var(--sr-info-m)', warning: 'var(--sr-warn-m)',
+  error: 'var(--sr-pend-m)', critical: 'var(--sr-pend-m)',
 };
+
+const thStyle: React.CSSProperties = {
+  padding: '10px 12px', fontSize: 11, fontWeight: 600, letterSpacing: '1.1px',
+  textTransform: 'uppercase', color: 'var(--text-muted)', textAlign: 'left', whiteSpace: 'nowrap',
+};
+const tdStyle: React.CSSProperties = { padding: '10px 12px', fontSize: 12.5, borderTop: '1px solid var(--border)' };
 
 export default function AuditPage() {
   const [logs, setLogs] = useState<any[]>([]);
@@ -15,51 +23,54 @@ export default function AuditPage() {
   }, [category]);
 
   return (
-    <div className="p-6">
-      <div className="flex items-center justify-between mb-6">
-        <h1 className="text-xl font-bold text-white">Audit Log</h1>
-        <div className="flex items-center gap-3">
-        <button onClick={() => ipc.exportAuditCsv()} className="px-3 py-1.5 bg-slate-700 text-white text-xs rounded-lg hover:bg-slate-600">
-          Export CSV
-        </button>
-        <select value={category} onChange={e => setCategory(e.target.value)}
-          className="px-3 py-1.5 bg-slate-800 border border-slate-700 rounded-lg text-sm text-white">
-          <option value="">All Categories</option>
+    <div style={{ padding: '18px 28px 28px', display: 'flex', flexDirection: 'column', gap: 14 }}>
+      {/* Toolbar */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        <div style={{ flex: 1 }} />
+        <Button variant="ghost" size="sm" onClick={() => ipc.exportAuditCsv()}>Export (CSV)</Button>
+        <Select value={category} onChange={e => setCategory(e.target.value)}>
+          <option value="">All categories</option>
           <option value="device">Device</option>
           <option value="config">Configuration</option>
           <option value="credential">Credentials</option>
           <option value="system">System</option>
-        </select>
-        </div>
+        </Select>
       </div>
 
-      <div className="bg-slate-800 rounded-xl border border-slate-700 overflow-hidden">
-        <table className="w-full text-sm">
-          <thead className="bg-slate-800/80">
-            <tr className="text-left text-xs text-slate-500 uppercase tracking-wide">
-              <th className="px-4 py-3 w-8">Sev</th>
-              <th className="px-4 py-3">Timestamp</th>
-              <th className="px-4 py-3">Action</th>
-              <th className="px-4 py-3">Category</th>
-              <th className="px-4 py-3">Device</th>
-              <th className="px-4 py-3">Details</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-slate-700/50">
-            {logs.map(log => (
-              <tr key={log.id} className="hover:bg-slate-800/50">
-                <td className="px-4 py-2.5"><span className={`inline-block w-2.5 h-2.5 rounded-full ${SEVERITY_COLORS[log.severity] || 'bg-slate-500'}`} /></td>
-                <td className="px-4 py-2.5 text-slate-500 text-xs whitespace-nowrap">{fmtDate(log.created_at)}</td>
-                <td className="px-4 py-2.5 text-white">{log.action}</td>
-                <td className="px-4 py-2.5 text-slate-400 capitalize">{log.category}</td>
-                <td className="px-4 py-2.5 text-slate-400">{log.device_name || '-'}</td>
-                <td className="px-4 py-2.5 text-slate-500 text-xs truncate max-w-xs">{log.details || '-'}</td>
+      <Card style={{ overflow: 'hidden' }}>
+        <div style={{ overflowX: 'auto' }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+            <thead style={{ background: 'var(--surface-sunken)' }}>
+              <tr>
+                <th style={{ ...thStyle, width: 48 }}>Sev</th>
+                <th style={thStyle}>Timestamp</th>
+                <th style={thStyle}>Action</th>
+                <th style={thStyle}>Category</th>
+                <th style={thStyle}>Device</th>
+                <th style={thStyle}>Details</th>
               </tr>
-            ))}
-            {logs.length === 0 && <tr><td colSpan={6} className="px-4 py-8 text-center text-slate-600">No audit logs</td></tr>}
-          </tbody>
-        </table>
-      </div>
+            </thead>
+            <tbody>
+              {logs.map(log => (
+                <tr key={log.id}>
+                  <td style={tdStyle}>
+                    <span style={{ display: 'inline-block', width: 9, height: 9, borderRadius: '50%', background: SEVERITY_MARK[log.severity] || 'var(--sr-aguard-m)' }} />
+                  </td>
+                  <td style={{ ...tdStyle, color: 'var(--text-muted)', fontSize: 12, fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}>{fmtDate(log.created_at)}</td>
+                  <td style={{ ...tdStyle, fontWeight: 700, color: 'var(--text)' }}>{log.action}</td>
+                  <td style={{ ...tdStyle, color: 'var(--text-muted)', textTransform: 'capitalize' }}>{log.category}</td>
+                  <td style={{ ...tdStyle, color: 'var(--text-muted)' }}>{log.device_name || '—'}</td>
+                  <td style={{ ...tdStyle, color: 'var(--text-muted)', fontSize: 12, maxWidth: 340, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }} title={log.details || undefined}>{log.details || '—'}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          {logs.length === 0 && (
+            <StateBlock variant="empty" compact title="No audit logs"
+              message="Actions performed by the app are recorded here." />
+          )}
+        </div>
+      </Card>
     </div>
   );
 }

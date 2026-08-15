@@ -2,6 +2,13 @@ import { useState, useEffect } from 'react';
 import { ipc } from '../hooks/useIpc';
 import { fmtDate } from '../utils/date';
 import { toast } from '../components/Toast';
+import { Badge, Button, Card, Eyebrow, StateBlock, TextInput } from '../components/ui';
+
+const thStyle: React.CSSProperties = {
+  padding: '10px 12px', fontSize: 11, fontWeight: 600, letterSpacing: '1.1px',
+  textTransform: 'uppercase', color: 'var(--text-muted)', textAlign: 'left', whiteSpace: 'nowrap',
+};
+const tdStyle: React.CSSProperties = { padding: '10px 12px', fontSize: 12.5, borderTop: '1px solid var(--border)' };
 
 export default function CredentialsPage() {
   const [creds, setCreds] = useState<any[]>([]);
@@ -65,84 +72,95 @@ export default function CredentialsPage() {
   };
 
   return (
-    <div className="p-6">
-      <div className="flex items-center justify-between mb-6">
-        <h1 className="text-xl font-bold text-white">Credentials</h1>
-        <button onClick={() => setShowAdd(!showAdd)} className="px-4 py-2 bg-brand-600 text-white text-sm rounded-lg hover:bg-brand-700">
-          {showAdd ? 'Cancel' : '+ Add Credential'}
-        </button>
+    <div style={{ padding: '18px 28px 28px', display: 'flex', flexDirection: 'column', gap: 14 }}>
+      {/* Toolbar */}
+      <div style={{ display: 'flex', alignItems: 'center' }}>
+        <div style={{ flex: 1 }} />
+        <Button variant={showAdd ? 'ghost' : 'primary'} size="sm" onClick={() => setShowAdd(!showAdd)}>
+          {showAdd ? 'Cancel' : '+ Add credential'}
+        </Button>
       </div>
 
-      {error && <div className="bg-red-900/30 border border-red-700 text-red-300 px-4 py-2 rounded-lg mb-4 text-sm">{error}</div>}
-
-      {showAdd && (
-        <div className="bg-slate-800 rounded-xl border border-slate-700 p-5 mb-6">
-          <div className="grid grid-cols-3 gap-4 mb-4">
-            <div>
-              <label className="text-xs text-slate-500 block mb-1">Name</label>
-              <input value={form.name} onChange={e => setForm({...form, name: e.target.value})} placeholder="e.g. Admin Access"
-                className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-lg text-sm text-white" autoFocus />
-            </div>
-            <div>
-              <label className="text-xs text-slate-500 block mb-1">Username</label>
-              <input value={form.username} onChange={e => setForm({...form, username: e.target.value})}
-                className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-lg text-sm text-white" />
-            </div>
-            <div>
-              <label className="text-xs text-slate-500 block mb-1">Password</label>
-              <input type="password" value={form.password} onChange={e => setForm({...form, password: e.target.value})}
-                className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-lg text-sm text-white"
-                onKeyDown={e => e.key === 'Enter' && handleAdd()} />
-            </div>
-          </div>
-          <div className="flex items-center justify-between">
-            <label className="flex items-center gap-2 cursor-pointer">
-              <input type="checkbox" checked={form.isDefault} onChange={e => setForm({...form, isDefault: e.target.checked})}
-                className="accent-brand-500 w-4 h-4" />
-              <span className="text-sm text-slate-300">Use as default credential for network discovery</span>
-            </label>
-            <button onClick={handleAdd} disabled={saving}
-              className="px-5 py-2 bg-emerald-600 text-white text-sm rounded-lg hover:bg-emerald-700 disabled:opacity-50">
-              {saving ? 'Saving...' : 'Save'}
-            </button>
-          </div>
-        </div>
+      {error && (
+        <div style={{
+          background: 'var(--sr-pend-bg)', border: '1px solid var(--border)', borderLeft: '4px solid var(--sr-pend-m)',
+          color: 'var(--sr-pend-fg)', padding: '10px 14px', borderRadius: 11, fontSize: 12.5,
+        }}>{error}</div>
       )}
 
-      <div className="bg-slate-800 rounded-xl border border-slate-700 overflow-hidden">
-        <table className="w-full text-sm">
-          <thead className="bg-slate-800/80">
-            <tr className="text-left text-xs text-slate-500 uppercase tracking-wide">
-              <th className="px-4 py-3">Default</th>
-              <th className="px-4 py-3">Name</th>
-              <th className="px-4 py-3">Username</th>
-              <th className="px-4 py-3">Created</th>
-              <th className="px-4 py-3">Actions</th>
+      {/* Add form */}
+      {showAdd && (
+        <Card style={{ padding: '16px 18px' }}>
+          <Eyebrow style={{ marginBottom: 10 }}>New credential</Eyebrow>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0,1fr))', gap: 14, marginBottom: 14 }}>
+            <label>
+              <span style={{ display: 'block', fontSize: 11.5, color: 'var(--text-muted)', marginBottom: 4 }}>Name</span>
+              <TextInput value={form.name} onChange={e => setForm({ ...form, name: e.target.value })}
+                placeholder="e.g. Admin Access" autoFocus style={{ width: '100%', boxSizing: 'border-box' }} />
+            </label>
+            <label>
+              <span style={{ display: 'block', fontSize: 11.5, color: 'var(--text-muted)', marginBottom: 4 }}>Username</span>
+              <TextInput value={form.username} onChange={e => setForm({ ...form, username: e.target.value })}
+                style={{ width: '100%', boxSizing: 'border-box' }} />
+            </label>
+            <label>
+              <span style={{ display: 'block', fontSize: 11.5, color: 'var(--text-muted)', marginBottom: 4 }}>Password</span>
+              <TextInput type="password" value={form.password} onChange={e => setForm({ ...form, password: e.target.value })}
+                onKeyDown={e => e.key === 'Enter' && handleAdd()} style={{ width: '100%', boxSizing: 'border-box' }} />
+            </label>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+            <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', fontSize: 12.5, color: 'var(--text)' }}>
+              <input type="checkbox" checked={form.isDefault} onChange={e => setForm({ ...form, isDefault: e.target.checked })}
+                style={{ accentColor: 'var(--sr-blue)', width: 15, height: 15 }} />
+              Use as default credential for network discovery
+            </label>
+            <Button variant="green" size="sm" disabled={saving} onClick={handleAdd}>{saving ? 'Saving…' : 'Save'}</Button>
+          </div>
+        </Card>
+      )}
+
+      {/* Credentials table */}
+      <Card style={{ overflow: 'hidden' }}>
+        <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+          <thead style={{ background: 'var(--surface-sunken)' }}>
+            <tr>
+              <th style={{ ...thStyle, width: 80 }}>Default</th>
+              <th style={thStyle}>Name</th>
+              <th style={thStyle}>Username</th>
+              <th style={thStyle}>Created</th>
+              <th style={{ ...thStyle, width: 90 }}>Actions</th>
             </tr>
           </thead>
-          <tbody className="divide-y divide-slate-700/50">
+          <tbody>
             {creds.map(c => (
-              <tr key={c.id} className="hover:bg-slate-800/50">
-                <td className="px-4 py-3">
+              <tr key={c.id}>
+                <td style={tdStyle}>
                   <input type="radio" name="default-cred" checked={!!c.is_default}
                     onChange={() => handleSetDefault(c.id)}
-                    className="accent-brand-500 w-4 h-4 cursor-pointer" />
+                    style={{ accentColor: 'var(--sr-blue)', width: 15, height: 15, cursor: 'pointer' }} />
                 </td>
-                <td className="px-4 py-3 text-white font-medium">
-                  {c.name}
-                  {!!c.is_default && <span className="ml-2 text-xs text-brand-400 bg-brand-500/10 px-2 py-0.5 rounded-full">Default</span>}
+                <td style={{ ...tdStyle, fontWeight: 700, color: 'var(--text)' }}>
+                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+                    {c.name}
+                    {!!c.is_default && <Badge tone="info">Default</Badge>}
+                  </span>
                 </td>
-                <td className="px-4 py-3 text-slate-400">{c.username}</td>
-                <td className="px-4 py-3 text-slate-500 text-xs">{fmtDate(c.created_at)}</td>
-                <td className="px-4 py-3">
-                  <button onClick={() => handleDelete(c.id)} className="text-red-500 text-xs hover:underline">Delete</button>
+                <td style={{ ...tdStyle, color: 'var(--text-muted)' }}>{c.username}</td>
+                <td style={{ ...tdStyle, color: 'var(--text-muted)', fontSize: 12, fontVariantNumeric: 'tabular-nums' }}>{fmtDate(c.created_at)}</td>
+                <td style={tdStyle}>
+                  <a href="#" onClick={e => { e.preventDefault(); handleDelete(c.id); }}
+                    style={{ color: 'var(--sr-pend-fg)', fontSize: 12, fontWeight: 700 }}>Delete</a>
                 </td>
               </tr>
             ))}
-            {creds.length === 0 && <tr><td colSpan={5} className="px-4 py-8 text-center text-slate-600">No credentials saved. Add one to enable auto-connect during discovery.</td></tr>}
           </tbody>
         </table>
-      </div>
+        {creds.length === 0 && (
+          <StateBlock variant="empty" compact title="No credentials saved"
+            message="Add one to enable auto-connect during discovery." />
+        )}
+      </Card>
     </div>
   );
 }

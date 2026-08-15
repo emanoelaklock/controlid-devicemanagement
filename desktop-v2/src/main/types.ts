@@ -96,16 +96,6 @@ export interface AuditLog {
   createdAt: string;
 }
 
-export interface ConfigTemplate {
-  id: string;
-  name: string;
-  manufacturer: string;
-  model: string | null;       // null = applies to all models from manufacturer
-  config: string;             // JSON blob
-  createdAt: string;
-  updatedAt: string;
-}
-
 export interface ConfigBackup {
   id: string;
   deviceId: string;
@@ -160,6 +150,12 @@ export interface DeviceAdapter {
   /** Open door / trigger relay */
   openDoor(connection: DeviceConnection, doorId?: number): Promise<boolean>;
 
+  /** Sound the device buzzer (physical locate) */
+  buzz?(connection: DeviceConnection, opts?: { frequency?: number; dutyCycle?: number; timeoutMs?: number }): Promise<boolean>;
+
+  /** Show a message on the device screen ('' clears it) */
+  showMessage?(connection: DeviceConnection, message: string, timeoutMs?: number): Promise<boolean>;
+
   /** Get device configuration as JSON */
   getConfig(connection: DeviceConnection): Promise<Record<string, unknown>>;
 
@@ -168,6 +164,39 @@ export interface DeviceAdapter {
 
   /** Change device credentials */
   changePassword(connection: DeviceConnection, newUsername: string, newPassword: string): Promise<boolean>;
+
+  // Extended operations (optional — Control iD only for now)
+
+  /** Read the device's network block (ip, netmask, gateway, dns, dhcp, ssl...) */
+  getNetwork?(connection: DeviceConnection): Promise<Record<string, unknown>>;
+
+  /** Change network settings; `changes` is overlaid on the current config */
+  setNetwork?(connection: DeviceConnection, changes: Record<string, unknown>): Promise<boolean>;
+
+  /** First-boot onboarding + credential change (safe on already-set-up devices) */
+  commissionDevice?(connection: DeviceConnection, opts: { newUsername: string; newPassword: string; language?: string; countryCode?: string }):
+    Promise<{ ok: boolean; onboarded: boolean }>;
+
+  /** Force-complete the on-screen setup wizard (language + legal terms) */
+  finishSetup?(connection: DeviceConnection, opts: { language?: string; countryCode?: string }): Promise<boolean>;
+
+  /** Download a device log as plain text */
+  downloadLog?(connection: DeviceConnection, kind: 'diagnostic' | 'audit'): Promise<string>;
+
+  // Firmware repair via the device's recovery mode (optional — Control iD only for now)
+
+  /** Whether the device is currently in recovery mode (no auth needed) */
+  isInRecovery?(ip: string): Promise<boolean>;
+
+  /** Reboot the device into recovery mode */
+  enterRecovery?(connection: DeviceConnection): Promise<void>;
+
+  /** From recovery mode, reboot back into the normal firmware (no auth needed) */
+  exitRecovery?(ip: string): Promise<void>;
+
+  /** Reinstall the firmware via recovery mode; factory=true also erases all config */
+  repairFirmware?(connection: DeviceConnection, opts?: { factory?: boolean }):
+    Promise<{ firmwareVersion: string | null; message: string }>;
 }
 
 export interface DeviceConnection {

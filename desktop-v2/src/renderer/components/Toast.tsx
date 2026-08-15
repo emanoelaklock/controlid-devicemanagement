@@ -23,11 +23,12 @@ export function ToastContainer() {
 
   useEffect(() => { addToastFn = addToast; return () => { addToastFn = null; }; }, [addToast]);
 
-  const colors: Record<string, string> = {
-    success: 'bg-emerald-600 border-emerald-500',
-    error: 'bg-red-600 border-red-500',
-    info: 'bg-brand-600 border-brand-500',
-    warning: 'bg-amber-600 border-amber-500',
+  // Service Report status families: soft tinted card + readable fg + mark edge.
+  const colors: Record<string, { bg: string; fg: string; m: string }> = {
+    success: { bg: 'var(--sr-exec-bg)', fg: 'var(--sr-exec-fg)', m: 'var(--sr-exec-m)' },
+    error: { bg: 'var(--sr-pend-bg)', fg: 'var(--sr-pend-fg)', m: 'var(--sr-pend-m)' },
+    info: { bg: 'var(--sr-info-bg)', fg: 'var(--sr-info-fg)', m: 'var(--sr-info-m)' },
+    warning: { bg: 'var(--sr-warn-bg)', fg: 'var(--sr-warn-fg)', m: 'var(--sr-warn-m)' },
   };
 
   const icons: Record<string, string> = {
@@ -36,16 +37,24 @@ export function ToastContainer() {
 
   return (
     <div className="fixed top-4 right-4 z-50 space-y-2 max-w-sm">
-      {toasts.map(t => (
-        <div key={t.id}
-          className={`${colors[t.type]} border-l-4 rounded-lg px-4 py-3 shadow-xl flex items-start gap-3 animate-fadeIn`}
-          onClick={() => setToasts(prev => prev.filter(x => x.id !== t.id))}
-        >
-          <span className="text-white text-sm mt-0.5">{icons[t.type]}</span>
-          <p className="text-white text-sm flex-1">{t.message}</p>
-          <button className="text-white/60 hover:text-white text-xs">✕</button>
-        </div>
-      ))}
+      {toasts.map(t => {
+        const c = colors[t.type];
+        return (
+          <div key={t.id}
+            className="rounded-lg px-4 py-3 flex items-start gap-3 animate-fadeIn cursor-pointer"
+            style={{
+              background: c.bg, color: c.fg, borderLeft: `4px solid ${c.m}`,
+              border: '1px solid var(--border)', borderLeftWidth: 4, borderLeftColor: c.m,
+              boxShadow: 'var(--sr-shadow-pop)',
+            }}
+            onClick={() => setToasts(prev => prev.filter(x => x.id !== t.id))}
+          >
+            <span className="text-sm mt-0.5">{icons[t.type]}</span>
+            <p className="text-sm flex-1 font-semibold">{t.message}</p>
+            <button className="text-xs opacity-60 hover:opacity-100">✕</button>
+          </div>
+        );
+      })}
     </div>
   );
 }

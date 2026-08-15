@@ -1,10 +1,13 @@
 import { useState, useEffect } from 'react';
 import { ipc } from '../hooks/useIpc';
 import { fmtDate } from '../utils/date';
+import { Badge, BadgeTone, Button, Card, Eyebrow, StateBlock } from '../components/ui';
 
-const STATUS_COLORS: Record<string, string> = {
-  pending: 'bg-slate-500', running: 'bg-blue-500', completed: 'bg-emerald-500',
-  failed: 'bg-red-500', cancelled: 'bg-amber-500',
+const STATUS_TONE: Record<string, BadgeTone> = {
+  pending: 'aguard', running: 'info', completed: 'exec', failed: 'pend', cancelled: 'warn',
+};
+const ITEM_MARK: Record<string, string> = {
+  success: 'var(--sr-exec-m)', failed: 'var(--sr-pend-m)', running: 'var(--sr-info-m)',
 };
 
 export default function JobsPage() {
@@ -24,65 +27,77 @@ export default function JobsPage() {
   };
 
   return (
-    <div className="flex h-full">
-      <div className="flex-1 overflow-auto">
-        <div className="p-6">
-          <h1 className="text-xl font-bold text-white mb-6">Tasks</h1>
-          <div className="space-y-3">
-            {jobs.map(job => (
-              <div key={job.id} onClick={() => viewDetail(job.id)}
-                className="bg-slate-800 rounded-xl border border-slate-700 p-4 cursor-pointer hover:border-slate-600 transition-colors">
-                <div className="flex items-center justify-between mb-2">
-                  <div className="flex items-center gap-2">
-                    <span className={`w-2.5 h-2.5 rounded-full ${STATUS_COLORS[job.status]}`} />
-                    <span className="text-sm font-medium text-white">{job.title}</span>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <span className="text-xs text-slate-500 capitalize">{job.status}</span>
+    <div style={{ padding: '18px 28px 28px' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: detail ? 'minmax(0,1fr) 340px' : 'minmax(0,1fr)', gap: 14, alignItems: 'start' }}>
+        {/* Job list */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 12, minWidth: 0 }}>
+          {jobs.map(job => (
+            <Card key={job.id} style={{ padding: '14px 18px', cursor: 'pointer' }} edge={detail?.job?.id === job.id ? 'var(--sr-blue)' : undefined}>
+              <div onClick={() => viewDetail(job.id)}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
+                  <span style={{ fontSize: 13.5, fontWeight: 700, color: 'var(--text)', letterSpacing: '-.1px' }}>{job.title}</span>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <Badge tone={STATUS_TONE[job.status] || 'aguard'} dot style={{ textTransform: 'capitalize' }}>{job.status}</Badge>
                     {job.status === 'running' && (
-                      <button onClick={e => { e.stopPropagation(); ipc.cancelJob(job.id); }}
-                        className="px-2 py-0.5 bg-red-700 text-white text-xs rounded hover:bg-red-600">Cancel</button>
+                      <Button variant="warn-outline" size="sm" onClick={e => { e.stopPropagation(); ipc.cancelJob(job.id); }}>Cancel</Button>
                     )}
                   </div>
                 </div>
-                <div className="h-1.5 bg-slate-700 rounded-full overflow-hidden">
-                  <div className={`h-full rounded-full transition-all ${job.status === 'failed' ? 'bg-red-500' : 'bg-brand-500'}`}
-                    style={{ width: `${job.progress}%` }} />
+                <div style={{ height: 6, background: 'var(--surface-sunken)', border: '1px solid var(--border)', borderRadius: 999, overflow: 'hidden' }}>
+                  <div style={{
+                    height: '100%', borderRadius: 999, transition: 'width .2s ease', width: `${job.progress}%`,
+                    background: job.status === 'failed' ? 'var(--sr-pend-m)' : job.status === 'completed' ? 'var(--sr-exec-m)' : 'var(--sr-blue)',
+                  }} />
                 </div>
-                <div className="flex items-center justify-between mt-2 text-xs text-slate-500">
-                  <span>{job.type} &middot; {job.completed_items}/{job.total_items} completed, {job.failed_items} failed</span>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 8, fontSize: 11.5, color: 'var(--text-muted)', fontVariantNumeric: 'tabular-nums' }}>
+                  <span>{job.type} · {job.completed_items}/{job.total_items} completed, {job.failed_items} failed</span>
                   <span>{fmtDate(job.created_at)}</span>
                 </div>
               </div>
-            ))}
-            {jobs.length === 0 && <p className="text-slate-600 text-center py-12">No tasks yet</p>}
-          </div>
+            </Card>
+          ))}
+          {jobs.length === 0 && (
+            <Card style={{ overflow: 'hidden' }}>
+              <StateBlock variant="empty" title="No tasks yet"
+                message="Batch actions started on the Devices page show up here with per-device results." />
+            </Card>
+          )}
         </div>
-      </div>
 
-      {detail && (
-        <div className="w-80 border-l border-slate-800 bg-slate-900/80 overflow-auto">
-          <div className="p-4 border-b border-slate-800 flex items-center justify-between">
-            <h2 className="text-sm font-semibold text-white">Task Details</h2>
-            <button onClick={() => setDetail(null)} className="text-slate-500 hover:text-white">&times;</button>
-          </div>
-          <div className="p-4">
-            <p className="text-sm text-white mb-4">{detail.job.title}</p>
-            <div className="space-y-2">
-              {detail.items.map((item: any) => (
-                <div key={item.id} className="flex items-center gap-2 text-xs">
-                  <span className={`w-2 h-2 rounded-full flex-shrink-0 ${
-                    item.status === 'success' ? 'bg-emerald-500' : item.status === 'failed' ? 'bg-red-500' :
-                    item.status === 'running' ? 'bg-blue-500' : 'bg-slate-500'
-                  }`} />
-                  <span className="text-slate-400 flex-1 truncate">{item.device_id}</span>
-                  <span className="text-slate-600">{item.status}</span>
+        {/* Detail column */}
+        {detail && (
+          <Card style={{ padding: '16px 18px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+              <Eyebrow>Task details</Eyebrow>
+              <button onClick={() => setDetail(null)} style={{
+                background: 'none', border: 'none', cursor: 'pointer', fontSize: 16,
+                color: 'var(--text-muted)', padding: 0, lineHeight: 1,
+              }}>×</button>
+            </div>
+            <p style={{ fontSize: 13, fontWeight: 700, color: 'var(--text)', margin: '0 0 12px' }}>{detail.job.title}</p>
+            <div style={{ display: 'flex', flexDirection: 'column', maxHeight: 480, overflowY: 'auto' }}>
+              {detail.items.map((item: any, i: number) => (
+                <div key={item.id} style={{ padding: '6px 0', borderBottom: i === detail.items.length - 1 ? 'none' : '1px solid var(--border)', fontSize: 12 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <span style={{ width: 8, height: 8, borderRadius: '50%', flex: 'none', background: ITEM_MARK[item.status] || 'var(--sr-aguard-m)' }} />
+                    <span style={{ color: 'var(--text)', fontWeight: 600, flex: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{item.device_name || item.device_id}</span>
+                    {item.ip_address && <span style={{ color: 'var(--text-muted)', fontSize: 11.5, fontVariantNumeric: 'tabular-nums' }}>{item.ip_address}</span>}
+                    <span style={{ color: 'var(--text-muted)', fontSize: 11.5 }}>{item.status}</span>
+                  </div>
+                  {item.message && (
+                    <p style={{
+                      margin: '3px 0 0 16px', overflowWrap: 'break-word', fontSize: 11.5,
+                      color: item.status === 'failed' ? 'var(--sr-pend-fg)' : 'var(--text-muted)',
+                    }}>
+                      {item.message}
+                    </p>
+                  )}
                 </div>
               ))}
             </div>
-          </div>
-        </div>
-      )}
+          </Card>
+        )}
+      </div>
     </div>
   );
 }

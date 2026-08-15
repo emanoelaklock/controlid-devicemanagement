@@ -15,6 +15,7 @@ export class HeartbeatService {
   private interval: ReturnType<typeof setInterval> | null = null;
   private checking = false;
   private offlineCounters = new Map<string, number>(); // deviceId -> consecutive offline count
+  private scanningDevices = new Set<string>(); // deviceIds with an in-flight MAC relocation scan
 
   start(getWindow: () => BrowserWindow | null, intervalMs = 5000): void {
     setTimeout(() => this.checkAll(getWindow), 3000);
@@ -31,7 +32,7 @@ export class HeartbeatService {
     this.checking = true;
 
     try {
-      const devices = query('SELECT id, ip_address, port, status, mac_address, dhcp_enabled FROM devices');
+      const devices = query('SELECT id, name, ip_address, port, status, mac_address, dhcp_enabled, manufacturer FROM devices');
       if (devices.length === 0) { this.checking = false; return; }
 
       let changed = false;
@@ -66,7 +67,7 @@ export class HeartbeatService {
 
           // If device is offline for 3+ cycles and has a MAC, try to find new IP
           // Works for both DHCP and manual IP changes (via web interface)
-          if (device.mac_address && offlineCount >= 3 && offlineCount % 6 === 0) {
+          if (device.mac_address && offlineCount >= 3 && offlineCount % 6 === 0 && !this.scanningDevices.has(device.id)) {
             console.log(`[Heartbeat] Device ${device.mac_address} offline for ${offlineCount} cycles, scanning for new IP...`);
             this.findDeviceByMac(device).catch(() => {});
           }
@@ -100,46 +101,54 @@ export class HeartbeatService {
    * Uses the device's MAC address to identify it.
    */
   private async findDeviceByMac(device: any): Promise<void> {
-    const oldIp = device.ip_address;
-    const subnet = oldIp.split('.').slice(0, 3).join('.');
-    const adapter = adapterRegistry.getAll()[0]; // Use first adapter for probing
-    if (!adapter) return;
+    // Guard against stacking scans: the trigger re-fires every 30s but a full
+    // /24 sweep can take longer, and N devices can go offline at once.
+    if (this.scanningDevices.has(device.id)) return;
+    this.scanningDevices.add(device.id);
+    try {
+      const oldIp = device.ip_address;
+      const subnet = oldIp.split('.').slice(0, 3).join('.');
+      const adapter = adapterRegistry.get(device.manufacturer) ?? adapterRegistry.getAll()[0];
+      if (!adapter) return;
 
-    // Scan subnet in parallel batches
-    const ips: string[] = [];
-    for (let i = 1; i <= 254; i++) {
-      const ip = `${subnet}.${i}`;
-      if (ip !== oldIp) ips.push(ip);
-    }
+      // Scan subnet in parallel batches
+      const ips: string[] = [];
+      for (let i = 1; i <= 254; i++) {
+        const ip = `${subnet}.${i}`;
+        if (ip !== oldIp) ips.push(ip);
+      }
 
-    // Check 30 IPs at a time
-    for (let i = 0; i < ips.length; i += 30) {
-      const batch = ips.slice(i, i + 30);
-      const results = await Promise.allSettled(
-        batch.map(async (ip) => {
-          const found = await adapter.probe(ip, device.port, 2000);
-          if (found && found.macAddress?.toUpperCase() === device.mac_address?.toUpperCase()) {
-            return ip;
+      // Check 30 IPs at a time
+      for (let i = 0; i < ips.length; i += 30) {
+        const batch = ips.slice(i, i + 30);
+        const results = await Promise.allSettled(
+          batch.map(async (ip) => {
+            const found = await adapter.probe(ip, device.port, 2000);
+            if (found && found.macAddress?.toUpperCase() === device.mac_address?.toUpperCase()) {
+              return ip;
+            }
+            return null;
+          })
+        );
+
+        for (const result of results) {
+          if (result.status === 'fulfilled' && result.value) {
+            const newIp = result.value;
+            console.log(`[Heartbeat] Found ${device.mac_address} at new IP: ${newIp} (was ${oldIp})`);
+            const ts3 = nowLocal();
+            run(`UPDATE devices SET ip_address=?, status='online', last_heartbeat=?, updated_at=? WHERE id=?`,
+              [newIp, ts3, ts3, device.id]);
+            run(`INSERT INTO audit_logs (id, action, category, device_id, device_name, details, severity) VALUES (?,?,?,?,?,?,?)`,
+              [uuid(), 'ip_changed', 'device', device.id, device.name,
+               `DHCP IP changed: ${oldIp} -> ${newIp}`, 'warning']);
+            this.offlineCounters.delete(device.id);
+            saveDb();
+            return;
           }
-          return null;
-        })
-      );
-
-      for (const result of results) {
-        if (result.status === 'fulfilled' && result.value) {
-          const newIp = result.value;
-          console.log(`[Heartbeat] Found ${device.mac_address} at new IP: ${newIp} (was ${oldIp})`);
-          const ts3 = nowLocal();
-          run(`UPDATE devices SET ip_address=?, status='online', last_heartbeat=?, updated_at=? WHERE id=?`,
-            [newIp, ts3, ts3, device.id]);
-          run(`INSERT INTO audit_logs (id, action, category, device_id, device_name, details, severity) VALUES (?,?,?,?,?,?,?)`,
-            [require('uuid').v4(), 'ip_changed', 'device', device.id, device.name,
-             `DHCP IP changed: ${oldIp} -> ${newIp}`, 'warning']);
-          this.offlineCounters.delete(device.id);
-          saveDb();
-          return;
         }
       }
+    } finally {
+      this.scanningDevices.delete(device.id);
     }
   }
 

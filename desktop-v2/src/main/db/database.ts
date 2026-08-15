@@ -150,18 +150,6 @@ function createSchema(): void {
   `);
 
   _db.run(`
-    CREATE TABLE IF NOT EXISTS config_templates (
-      id TEXT PRIMARY KEY NOT NULL,
-      name TEXT NOT NULL,
-      manufacturer TEXT NOT NULL,
-      model TEXT,
-      config TEXT NOT NULL DEFAULT '{}',
-      created_at TEXT NOT NULL DEFAULT (datetime('now','localtime')),
-      updated_at TEXT NOT NULL DEFAULT (datetime('now','localtime'))
-    )
-  `);
-
-  _db.run(`
     CREATE TABLE IF NOT EXISTS config_backups (
       id TEXT PRIMARY KEY NOT NULL,
       device_id TEXT NOT NULL REFERENCES devices(id) ON DELETE CASCADE,
@@ -169,6 +157,24 @@ function createSchema(): void {
       config TEXT NOT NULL DEFAULT '{}',
       version INTEGER NOT NULL DEFAULT 1,
       created_at TEXT NOT NULL DEFAULT (datetime('now','localtime'))
+    )
+  `);
+
+  _db.run(`
+    CREATE TABLE IF NOT EXISTS app_settings (
+      key TEXT PRIMARY KEY NOT NULL,
+      value TEXT NOT NULL
+    )
+  `);
+
+  _db.run(`
+    CREATE TABLE IF NOT EXISTS config_templates (
+      id TEXT PRIMARY KEY NOT NULL,
+      name TEXT NOT NULL,
+      description TEXT,
+      config TEXT NOT NULL DEFAULT '{}',
+      created_at TEXT NOT NULL DEFAULT (datetime('now','localtime')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now','localtime'))
     )
   `);
 
@@ -208,6 +214,12 @@ function createSchema(): void {
     )
   `);
 
+  // Lightweight migrations: CREATE TABLE IF NOT EXISTS doesn't alter existing
+  // tables, so columns added after v2.0 are bolted on here (no-op once applied).
+  // devices.factory_credentials: NULL = never audited, 1 = accepts admin/admin,
+  // 0 = audited and factory login rejected.
+  try { _db.run(`ALTER TABLE devices ADD COLUMN factory_credentials INTEGER`); } catch { /* already exists */ }
+
   _db.run(`CREATE INDEX IF NOT EXISTS idx_devices_status ON devices(status)`);
   _db.run(`CREATE INDEX IF NOT EXISTS idx_devices_ip ON devices(ip_address)`);
   _db.run(`CREATE INDEX IF NOT EXISTS idx_audit_logs_created ON audit_logs(created_at)`);
@@ -217,4 +229,14 @@ function createSchema(): void {
 
   // Purge connection history older than 90 days
   _db.run(`DELETE FROM connection_history WHERE timestamp < datetime('now', '-90 days')`);
+
+  // Jobs don't survive an app restart — anything still pending/running was
+  // orphaned by a previous session, so close it out as cancelled instead of
+  // letting it count as "running" forever on the Dashboard.
+  _db.run(`UPDATE job_items SET status='cancelled', message='App closed before this item finished',
+      completed_at=datetime('now','localtime')
+    WHERE status IN ('pending','running')
+      AND job_id IN (SELECT id FROM jobs WHERE status IN ('pending','running'))`);
+  _db.run(`UPDATE jobs SET status='cancelled', cancelled_at=datetime('now','localtime')
+    WHERE status IN ('pending','running')`);
 }

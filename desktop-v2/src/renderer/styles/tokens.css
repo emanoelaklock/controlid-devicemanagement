@@ -1,0 +1,89 @@
+/* ============================================================================
+   SERVICE REPORT DESIGN TOKENS — copied from _ds/…/tokens/{colors,semantic,
+   typography,spacing}.css (source of truth). Dark theme flips the base
+   variables under [data-theme="dark"] on <html>.
+   ========================================================================== */
+:root {
+  /* ---- Brand palette — color = state ---- */
+  --sr-red: #E5403A;
+  --sr-orange: #F4861F;
+  --sr-yellow: #F7B81E;
+  --sr-green: #179A47;
+  --sr-blue: #1E8AE0;
+  --sr-purple: #8E45B5;
+  --sr-pink: #D63384;
+  --sr-teal: #119DA4;
+
+  /* ---- Neutrals (light) ---- */
+  --sr-bg: #F3F4F8;
+  --sr-card: #FFFFFF;
+  --sr-line: #ECEEF3;
+  --sr-line-strong: #DCE0E8;
+  --sr-ink: #1B1E26;
+  --sr-muted: #636A76;
+  --sr-title: #243456;
+  --sr-sidebar: #1B2A4A;
+
+  /* ---- Status families (bg · fg · mark) ---- */
+  --sr-exec-bg: #E6F6EC;  --sr-exec-fg: #0B7A43;  --sr-exec-m: #179A47;
+  --sr-info-bg: #E7F1FC;  --sr-info-fg: #1565C0;  --sr-info-m: #1E8AE0;
+  --sr-warn-bg: #FEF3DA;  --sr-warn-fg: #92670A;  --sr-warn-m: #F7B81E;
+  --sr-pend-bg: #FDECEA;  --sr-pend-fg: #C0362C;  --sr-pend-m: #E5403A;
+  --sr-move-bg: #FDEEE0;  --sr-move-fg: #A8540A;  --sr-move-m: #F4861F;
+  --sr-jrny-bg: #F3E8FA;  --sr-jrny-fg: #6C2F96;  --sr-jrny-m: #8E45B5;
+  --sr-aguard-bg: #EEF0F4; --sr-aguard-fg: #5B6573; --sr-aguard-m: #9CA3AF;
+  --sr-teal-bg: #E4F6F6;  --sr-teal-fg: #0B7178;  --sr-teal-m: #119DA4;
+
+  /* ---- Typography ---- */
+  --sr-font: 'Manrope', system-ui, -apple-system, 'Segoe UI', sans-serif;
+
+  /* ---- Shadows ---- */
+  --sr-shadow-card: 0 1px 2px rgba(16, 24, 40, .06);
+  --sr-shadow-pop: 0 8px 16px rgba(30, 40, 70, .12);
+  --sr-shadow-primary: 0 8px 16px rgba(30, 138, 224, .24);
+  --sr-shadow-kpi-blue: 0 8px 18px rgba(27, 127, 196, .10);
+  --sr-shadow-kpi-green: 0 8px 18px rgba(23, 154, 71, .10);
+  --sr-shadow-kpi-amber: 0 8px 18px rgba(247, 184, 30, .14);
+  --sr-shadow-kpi-purple: 0 8px 18px rgba(142, 69, 181, .10);
+
+  /* ---- Semantic aliases ---- */
+  --surface: var(--sr-bg);
+  --surface-card: var(--sr-card);
+  --surface-sunken: #ECEEF3;
+  --text-strong: var(--sr-title);
+  --text: var(--sr-ink);
+  --text-muted: var(--sr-muted);
+  --text-on-fill: #FFFFFF;
+  --text-on-warn: #1A1A1A;
+  --border: var(--sr-line);
+  --border-strong: var(--sr-line-strong);
+  --border-focus: var(--sr-blue);
+  --focus-ring: rgba(30, 138, 224, .15);
+  color-scheme: light;
+}
+
+/* ---- DARK THEME — values from _ds/tokens/semantic.css ---- */
+[data-theme="dark"] {
+  color-scheme: dark;
+
+  --sr-bg: #0F141B;
+  --sr-card: #1A212C;
+  --sr-line: #283039;
+  --sr-line-strong: #3A4250;
+  --sr-ink: #E9EDF3;
+  --sr-muted: #9AA3B1;
+  --sr-title: #CDD8EC;
+  --surface-sunken: #141A22;
+
+  --sr-exec-bg: #13261C;  --sr-exec-fg: #74D9A0;  --sr-exec-m: #2DB869;
+  --sr-info-bg: #11263A;  --sr-info-fg: #73B9F2;  --sr-info-m: #3B9BEE;
+  --sr-warn-bg: #2A2310;  --sr-warn-fg: #F3CB63;  --sr-warn-m: #F7B81E;
+  --sr-pend-bg: #2E1614;  --sr-pend-fg: #F58E84;  --sr-pend-m: #F0584F;
+  --sr-move-bg: #281B0F;  --sr-move-fg: #F1A75F;  --sr-move-m: #F4861F;
+  --sr-jrny-bg: #221531;  --sr-jrny-fg: #CC9EE8;  --sr-jrny-m: #A765D0;
+  --sr-aguard-bg: #1E242E; --sr-aguard-fg: #A3ACBA; --sr-aguard-m: #6B7480;
+  --sr-teal-bg: #12302F;  --sr-teal-fg: #5FD4DA;  --sr-teal-m: #2CB7BE;
+
+  --sr-shadow-card: 0 1px 2px rgba(0, 0, 0, .40);
+  --sr-shadow-pop: 0 10px 22px rgba(0, 0, 0, .55);
+}
