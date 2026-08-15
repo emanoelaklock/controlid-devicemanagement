@@ -406,6 +406,12 @@ export default function DeviceDetailPage({ deviceId, onBack }: { deviceId: strin
               <Button variant="ghost" size="sm" disabled={noCred} onClick={handleFinishSetup}>Finish setup (wizard)</Button>
               <Button variant="ghost" size="sm" disabled={noCred} onClick={() => handleLogs('Diagnostic logs', 'diagnostic')}>Diagnostic logs</Button>
               <Button variant="ghost" size="sm" disabled={noCred} onClick={() => handleLogs('Audit logs', 'audit')}>Audit logs</Button>
+              <Button variant="ghost" size="sm" disabled={noCred} onClick={async () => {
+                try {
+                  const r = await ipc.batchUploadLogo([deviceId]);
+                  if (!r?.cancelled) toast('Logo upload started — see Tasks page.', 'info');
+                } catch (e: any) { toast(`Logo upload failed to start: ${e.message || e}`, 'error'); }
+              }}>Upload logo</Button>
               <Button variant="ghost" size="sm" onClick={handleEditNotes}>Edit notes</Button>
               <Button variant="warn-outline" size="sm" disabled={noCred} onClick={handleReboot}>Reboot</Button>
             </ActionRow>

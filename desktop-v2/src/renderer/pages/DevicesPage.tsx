@@ -150,6 +150,15 @@ export default function DevicesPage({ onOpenDevice }: { onOpenDevice: (id: strin
     } catch (e: any) { toast(`Hardening failed to start: ${e.message || e}`, 'error'); }
   };
 
+  const handleBatchUploadLogo = async () => {
+    try {
+      const r = await ipc.batchUploadLogo(Array.from(selected));
+      if (r?.cancelled) return;
+      toast('Logo upload job started — see Tasks page for results.', 'info');
+      setSelected(new Set());
+    } catch (e: any) { toast(`Logo upload failed to start: ${e.message || e}`, 'error'); }
+  };
+
   const handleBatchDelete = async () => {
     const n = selected.size;
     if (!(await ipc.confirm(`Delete ${n} device(s)? Their connection history and config backups are removed too. They can be re-added later via Discovery.`))) return;
@@ -237,6 +246,7 @@ export default function DevicesPage({ onOpenDevice }: { onOpenDevice: (id: strin
           <Button variant="ghost" size="sm" onClick={handleBatchCredentials}>Set credentials</Button>
           <Button variant="ghost" size="sm" onClick={() => setNtpModal(true)}>Set NTP</Button>
           <Button variant="ghost" size="sm" onClick={() => setHardenModal(true)}>Harden</Button>
+          <Button variant="ghost" size="sm" onClick={handleBatchUploadLogo}>Upload logo</Button>
           <Button variant="ghost" size="sm" onClick={handleBatchAudit}>Audit</Button>
           <Button variant="warn-outline" size="sm" onClick={handleBatchReboot}>Reboot</Button>
           <Button variant="danger" size="sm" onClick={handleBatchRepairFirmware}>Update firmware</Button>

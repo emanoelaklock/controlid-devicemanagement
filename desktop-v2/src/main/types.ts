@@ -71,6 +71,7 @@ export type JobType =
   | 'batch_credential'
   | 'batch_config'
   | 'sync_people'
+  | 'upload_logo'
   | 'health_check';
 
 export type JobStatus = 'pending' | 'running' | 'completed' | 'failed' | 'cancelled';
@@ -182,6 +183,9 @@ export interface DeviceAdapter {
 
   /** Download a device log as plain text */
   downloadLog?(connection: DeviceConnection, kind: 'diagnostic' | 'audit'): Promise<string>;
+
+  /** Upload a PNG logo to the device and enable it on screen */
+  uploadLogo?(connection: DeviceConnection, png: Buffer): Promise<void>;
 
   // Firmware repair via the device's recovery mode (optional — Control iD only for now)
 

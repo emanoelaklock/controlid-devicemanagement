@@ -12,7 +12,7 @@ contextBridge.exposeInMainWorld('api', {
       'devices:test-connection', 'devices:locate', 'devices:reboot', 'devices:open-door',
       'devices:set-time', 'devices:factory-reset', 'devices:set-network', 'devices:get-network', 'devices:finish-setup', 'devices:download-logs',
       'devices:locate-physical',
-      'batch:reboot', 'batch:test-connection', 'batch:backup', 'batch:change-credentials', 'batch:set-ntp', 'batch:harden',
+      'batch:reboot', 'batch:test-connection', 'batch:backup', 'batch:change-credentials', 'batch:set-ntp', 'batch:harden', 'batch:upload-logo',
       'security:audit',
       'settings:get-all', 'settings:set',
       'discovery:scan', 'discovery:cancel',
