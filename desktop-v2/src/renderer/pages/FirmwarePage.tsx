@@ -21,11 +21,11 @@ export default function FirmwarePage() {
   };
 
   const handleRepair = async (d: any) => {
-    if (!(await ipc.confirm(`Reinstall the firmware on "${d.name}" via recovery mode? The device downloads the firmware from Control iD (it needs INTERNET access), reflashes itself and reboots — offline for several minutes. Settings and users are KEPT.`))) return;
+    if (!(await ipc.confirm(`Update the firmware on "${d.name}" via recovery mode? The device downloads the firmware from Control iD (it needs INTERNET access), reflashes itself and reboots — offline for several minutes. Settings and users are KEPT.`))) return;
     try {
       await ipc.firmwareRepair([d.id]);
-      toast('Firmware repair started — follow progress on the Tasks page.', 'info');
-    } catch (e: any) { toast(`Could not start repair: ${e.message || e}`, 'error'); }
+      toast('Firmware update started — follow progress on the Tasks page.', 'info');
+    } catch (e: any) { toast(`Could not start the update: ${e.message || e}`, 'error'); }
   };
 
   if (!summary) return <div style={{ padding: '18px 28px', color: 'var(--text-muted)' }}>Loading…</div>;
@@ -47,11 +47,11 @@ export default function FirmwarePage() {
         background: 'var(--sr-info-bg)', border: '1px solid var(--border)', borderRadius: 11,
         padding: '10px 14px', fontSize: 12, color: 'var(--sr-info-fg)', lineHeight: 1.55,
       }}>
-        <b>Repair</b> reinstalls the firmware through the device's recovery mode: the device
+        <b>Update firmware</b> boots the device into recovery mode, where it
         <b>downloads the firmware from Control iD's servers</b>, verifies its signature and reflashes
-        itself (settings and users are kept) — use it for corrupted installs or boot loops.
+        itself (settings and users are kept) — also use it to repair corrupted installs or boot loops.
         <b>The device needs internet access</b> for this. The API does not accept firmware uploads;
-        version upgrades can also be run from the update option on the device's About screen.
+        updates can also be run from the option on the device's About screen.
       </div>
 
       {/* Summary tiles */}
@@ -93,7 +93,7 @@ export default function FirmwarePage() {
               <span style={{ width: 8, height: 8, borderRadius: '50%', flex: 'none', background: d.status === 'online' ? 'var(--sr-exec-m)' : 'var(--sr-pend-m)' }} />
               <span style={{ fontSize: 12.5, fontWeight: 700, color: 'var(--text)', flex: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{d.name}</span>
               <span style={{ fontSize: 12, color: 'var(--text-muted)', fontVariantNumeric: 'tabular-nums' }}>{d.ip_address}</span>
-              <Button variant="warn-outline" size="sm" onClick={() => handleRepair(d)}>Repair</Button>
+              <Button variant="warn-outline" size="sm" onClick={() => handleRepair(d)}>Update</Button>
             </div>
           ))}
         </Card>
