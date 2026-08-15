@@ -383,6 +383,26 @@ export class ControlIdAdapter implements DeviceAdapter {
     }
   }
 
+  /**
+   * Upload the company logo into slot 1 and enable it on the menu screen.
+   * PNG only, ≤1MB / ≤1000x1000 — the device scales it to 272x240.
+   * Docs: photos-and-logo/manage-logo → POST /logo_change.fcgi (binary body,
+   * application/octet-stream) + set_configuration {general:{show_logo:"1"}}.
+   */
+  async uploadLogo(conn: DeviceConnection, png: Buffer): Promise<void> {
+    const proto = conn.port === 443 ? 'https' : 'http';
+    const session = await this.login(conn);
+    try {
+      const res = await this.httpPostBinary(proto, conn.ip, conn.port, '/logo_change.fcgi?id=1', png, 20000, session);
+      if (res?.error) throw new Error(`logo_change failed: ${typeof res.error === 'string' ? res.error : JSON.stringify(res.error)}`);
+      const cfg = await this.httpRequest(proto, conn.ip, conn.port, '/set_configuration.fcgi',
+        JSON.stringify({ general: { show_logo: '1' } }), 10000, session);
+      if (cfg?.error) throw new Error(`logo uploaded, but enabling it failed: ${typeof cfg.error === 'string' ? cfg.error : JSON.stringify(cfg.error)}`);
+    } finally {
+      await this.httpRequest(proto, conn.ip, conn.port, '/logout.fcgi', '{}', 5000, session).catch(() => {});
+    }
+  }
+
   // ─── Firmware repair via Web Recovery ───────────────────────────
   // The public API has no endpoint to upload a firmware binary. What exists is:
   //  - POST /reboot_recovery.fcgi (official docs, empty body) → device reboots
@@ -701,6 +721,37 @@ export class ControlIdAdapter implements DeviceAdapter {
         headers: {
           'Content-Type': 'application/json',
           'Content-Length': Buffer.byteLength(body),
+          ...(session ? { Cookie: `session=${session}` } : {}),
+        },
+        ...(protocol === 'https' ? { agent: httpsAgent } : {}),
+      };
+      const req = mod.request(options, (res) => {
+        let data = '';
+        res.on('data', (chunk: string) => { data += chunk; });
+        res.on('end', () => { try { resolve(JSON.parse(data)); } catch { resolve(null); } });
+      });
+      req.on('error', reject);
+      req.on('timeout', () => { req.destroy(); reject(new Error('Timeout')); });
+      req.write(body);
+      req.end();
+    });
+  }
+
+  /** POST a binary body (application/octet-stream) returning parsed JSON. */
+  private httpPostBinary(
+    protocol: string, ip: string, port: number, path: string,
+    body: Buffer, timeoutMs: number, session?: string
+  ): Promise<any> {
+    const fullPath = session
+      ? `${path}${path.includes('?') ? '&' : '?'}session=${encodeURIComponent(session)}`
+      : path;
+    return new Promise((resolve, reject) => {
+      const mod = protocol === 'https' ? https : http;
+      const options: https.RequestOptions = {
+        hostname: ip, port, path: fullPath, method: 'POST', timeout: timeoutMs,
+        headers: {
+          'Content-Type': 'application/octet-stream',
+          'Content-Length': body.length,
           ...(session ? { Cookie: `session=${session}` } : {}),
         },
         ...(protocol === 'https' ? { agent: httpsAgent } : {}),

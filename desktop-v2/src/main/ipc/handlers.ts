@@ -323,6 +323,35 @@ export function registerIpcHandlers(getWindow: () => BrowserWindow | null): void
       }, getWindow());
   });
 
+  // Upload a PNG logo to every selected device (slot 1 + show_logo=1).
+  // filePath is normally chosen via the native file dialog; tests pass it in.
+  ipcMain.handle('batch:upload-logo', async (_e, { deviceIds, filePath }: { deviceIds: string[]; filePath?: string }) => {
+    let file = filePath;
+    if (!file) {
+      const win = getWindow();
+      if (!win) return { cancelled: true };
+      const r = await dialog.showOpenDialog(win, {
+        title: 'Choose the logo image (PNG)',
+        filters: [{ name: 'PNG image', extensions: ['png'] }],
+        properties: ['openFile'],
+      });
+      if (r.canceled || !r.filePaths[0]) return { cancelled: true };
+      file = r.filePaths[0];
+    }
+    const png = fs.readFileSync(file);
+    if (png.length > 1024 * 1024) throw new Error('The logo must be 1 MB or smaller');
+    if (!(png[0] === 0x89 && png[1] === 0x50 && png[2] === 0x4e && png[3] === 0x47)) {
+      throw new Error('The file is not a PNG image');
+    }
+    return jobService.createJob('upload_logo', `Upload logo to ${deviceIds.length} device(s)`, deviceIds,
+      async (conn, device) => {
+        const adapter = adapterRegistry.get(device.manufacturer);
+        if (!adapter?.uploadLogo) throw new Error('Adapter does not support logo upload');
+        await adapter.uploadLogo(conn, png);
+        return 'Logo uploaded and enabled (slot 1)';
+      }, getWindow());
+  });
+
   // Change device login (web + API credential) remotely, in batch.
   // Creates/reuses a local credential record and re-assigns each device on
   // success, so the app keeps connecting after the change.
