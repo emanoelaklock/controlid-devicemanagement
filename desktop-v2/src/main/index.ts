@@ -10,6 +10,10 @@ import { schedulerService } from './services/scheduler.service';
 // Without this, all HTTPS requests to devices will fail with CERT errors.
 process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
 
+// Must match build.appId (the NSIS shortcut's AppUserModelID) — otherwise
+// Windows toasts show a raw "electron.app.…" header instead of the app name.
+app.setAppUserModelId('com.controlid.devicemanager');
+
 let mainWindow: BrowserWindow | null = null;
 let tray: Tray | null = null;
 let isQuitting = false;
@@ -86,9 +90,9 @@ function createWindow(): void {
       balloonShown = true;
       try {
         tray.displayBalloon({
-          title: 'Still monitoring',
-          content: 'Device Manager keeps running in the tray — the heartbeat stays active. Right-click the tray icon to quit.',
-          iconType: 'info',
+          title: 'Monitoring continues in the background',
+          content: 'Devices are still being monitored. Click the tray icon to reopen, or right-click it to quit.',
+          icon: path.join(app.getAppPath(), 'assets', 'icon.ico'),
         });
       } catch { /* balloons unsupported — fine */ }
     }
