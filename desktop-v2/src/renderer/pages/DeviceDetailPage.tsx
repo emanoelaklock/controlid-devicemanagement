@@ -233,7 +233,7 @@ export default function DeviceDetailPage({ deviceId, onBack }: { deviceId: strin
   };
 
   const handleRepairFirmware = async () => {
-    if (!(await ipc.confirm('Reinstall the current firmware via recovery mode? Settings and users are KEPT. The device stays offline for several minutes while it reboots into recovery, reapplies its firmware image and boots back. Use this for corrupted firmware or boot loops.'))) return;
+    if (!(await ipc.confirm('Reinstall the firmware via recovery mode? The device downloads the firmware from Control iD (it needs INTERNET access), reflashes itself and reboots — offline for several minutes. Settings and users are KEPT. Use this for corrupted firmware or boot loops.'))) return;
     try {
       await ipc.firmwareRepair([deviceId]);
       toast('Firmware repair started — follow progress on the Tasks page.', 'info');
