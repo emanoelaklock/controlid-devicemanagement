@@ -150,6 +150,17 @@ export default function DevicesPage({ onOpenDevice }: { onOpenDevice: (id: strin
     } catch (e: any) { toast(`Hardening failed to start: ${e.message || e}`, 'error'); }
   };
 
+  const handleBatchDelete = async () => {
+    const n = selected.size;
+    if (!(await ipc.confirm(`Delete ${n} device(s)? Their connection history and config backups are removed too. They can be re-added later via Discovery.`))) return;
+    for (const id of Array.from(selected)) {
+      try { await ipc.deleteDevice(id); } catch (e: any) { toast(`Delete failed: ${e.message || e}`, 'error'); }
+    }
+    toast(`${n} device(s) deleted.`, 'success');
+    setSelected(new Set());
+    load();
+  };
+
   const handleRefresh = async () => {
     const allIds = devices.filter(d => d.credential_id).map((d: any) => d.id);
     if (allIds.length === 0) { toast('No devices with credentials to refresh.', 'warning'); return; }
@@ -229,6 +240,8 @@ export default function DevicesPage({ onOpenDevice }: { onOpenDevice: (id: strin
           <Button variant="ghost" size="sm" onClick={handleBatchAudit}>Audit</Button>
           <Button variant="warn-outline" size="sm" onClick={handleBatchReboot}>Reboot</Button>
           <Button variant="danger" size="sm" onClick={handleBatchRepairFirmware}>Update firmware</Button>
+          <div style={{ flex: 1 }} />
+          <Button variant="danger" size="sm" onClick={handleBatchDelete}>Delete</Button>
         </div>
       )}
 
