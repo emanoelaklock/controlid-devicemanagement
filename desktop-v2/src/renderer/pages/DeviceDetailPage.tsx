@@ -355,8 +355,8 @@ export default function DeviceDetailPage({ deviceId, onBack }: { deviceId: strin
               </InfoRow>
               <InfoRow label="MAC">{device.mac_address || '—'}</InfoRow>
               <InfoRow label="DHCP">{device.dhcp_enabled ? 'Yes · automatic' : 'No · static'}</InfoRow>
-              <InfoRow label="Gateway">{liveNet?.gateway || '—'}</InfoRow>
               <InfoRow label="Netmask">{liveNet?.netmask || '—'}</InfoRow>
+              <InfoRow label="Gateway">{liveNet?.gateway || '—'}</InfoRow>
               <InfoRow label="HTTPS" last>{device.https_enabled ? `On · port ${device.port}` : `Off · port ${device.port}`}</InfoRow>
             </Card>
 
