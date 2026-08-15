@@ -229,4 +229,14 @@ function createSchema(): void {
 
   // Purge connection history older than 90 days
   _db.run(`DELETE FROM connection_history WHERE timestamp < datetime('now', '-90 days')`);
+
+  // Jobs don't survive an app restart — anything still pending/running was
+  // orphaned by a previous session, so close it out as cancelled instead of
+  // letting it count as "running" forever on the Dashboard.
+  _db.run(`UPDATE job_items SET status='cancelled', message='App closed before this item finished',
+      completed_at=datetime('now','localtime')
+    WHERE status IN ('pending','running')
+      AND job_id IN (SELECT id FROM jobs WHERE status IN ('pending','running'))`);
+  _db.run(`UPDATE jobs SET status='cancelled', cancelled_at=datetime('now','localtime')
+    WHERE status IN ('pending','running')`);
 }
