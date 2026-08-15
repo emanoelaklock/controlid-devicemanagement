@@ -26,6 +26,9 @@ export default function DevicesPage() {
   const [netModal, setNetModal] = useState(false);
   const [netSaving, setNetSaving] = useState(false);
   const [netForm, setNetForm] = useState({ dhcp: false, ip: '', netmask: '255.255.255.0', gateway: '', primary_dns: '', secondary_dns: '' });
+  const [ntpModal, setNtpModal] = useState(false);
+  const [ntpForm, setNtpForm] = useState({ enabled: true, timezone: 'UTC-3' });
+  const [backups, setBackups] = useState<any[]>([]);
   const [cfgModal, setCfgModal] = useState(false);
   const [cfgLoading, setCfgLoading] = useState(false);
   const [cfgSaving, setCfgSaving] = useState(false);
@@ -104,8 +107,14 @@ export default function DevicesPage() {
   const setDetailAndRef = (d: any) => {
     setDetail(d);
     detailRef.current = d;
-    if (d?.id) ipc.deviceHistory(d.id, 90).then(setHistory).catch(() => setHistory([]));
-    else setHistory([]);
+    if (d?.id) {
+      ipc.deviceHistory(d.id, 90).then(setHistory).catch(() => setHistory([]));
+      ipc.listBackups(d.id).then(setBackups).catch(() => setBackups([]));
+    } else { setHistory([]); setBackups([]); }
+  };
+
+  const refreshBackups = () => {
+    if (detailRef.current?.id) ipc.listBackups(detailRef.current.id).then(setBackups).catch(() => {});
   };
 
   const toggleSelect = (id: string) => {
@@ -236,6 +245,15 @@ export default function DevicesPage() {
     setSelected(new Set());
   };
 
+  const applyNtp = async () => {
+    try {
+      await ipc.batchSetNtp(Array.from(selected), ntpForm.enabled, ntpForm.timezone);
+      toast('NTP configuration job started — see Tasks page.', 'info');
+      setNtpModal(false);
+      setSelected(new Set());
+    } catch (e: any) { toast(`NTP job failed to start: ${e.message || e}`, 'error'); }
+  };
+
   const handleBatchRepairFirmware = async () => {
     if (!(await ipc.confirm(`Reinstall firmware on ${selected.size} device(s) via recovery mode? Devices are processed ONE AT A TIME and each stays offline for several minutes. Settings and users are kept.`))) return;
     await ipc.firmwareRepair(Array.from(selected));
@@ -339,6 +357,7 @@ export default function DevicesPage() {
               <button onClick={handleBatchCredentials} className="px-3 py-1.5 bg-purple-600 text-white text-xs rounded-lg hover:bg-purple-700">Set Credentials</button>
               <button onClick={handleBatchReboot} className="px-3 py-1.5 bg-amber-600 text-white text-xs rounded-lg hover:bg-amber-700">Reboot</button>
               <button onClick={handleBatchRepairFirmware} className="px-3 py-1.5 bg-rose-700 text-white text-xs rounded-lg hover:bg-rose-600">Repair FW</button>
+              <button onClick={() => setNtpModal(true)} className="px-3 py-1.5 bg-sky-700 text-white text-xs rounded-lg hover:bg-sky-600">Set NTP</button>
             </div>
           )}
           <button onClick={() => ipc.exportDevicesCsv()} className="px-3 py-1.5 bg-slate-700 text-white text-xs rounded-lg hover:bg-slate-600">
@@ -517,6 +536,42 @@ export default function DevicesPage() {
             </div>
           )}
 
+          {/* Config backups */}
+          {detail.credential_id && (
+            <div className="px-4 py-3 border-t border-slate-800">
+              <div className="flex items-center justify-between mb-2">
+                <h3 className="text-xs text-slate-600 uppercase tracking-wide">Config Backups ({backups.length})</h3>
+                <button onClick={async () => {
+                  try {
+                    toast('Reading configuration for backup...', 'info');
+                    const b = await ipc.backupConfig(detail.id);
+                    toast(`Backup v${b.version} saved.`, 'success');
+                    refreshBackups();
+                  } catch (e: any) { toast(`Backup failed: ${e.message || e}`, 'error'); }
+                }} className="text-xs text-brand-400 hover:text-brand-300">Backup now</button>
+              </div>
+              {backups.length > 0 ? (
+                <div className="space-y-1 max-h-36 overflow-auto">
+                  {backups.map((b: any) => (
+                    <div key={b.id} className="flex items-center gap-2 text-xs">
+                      <span className="text-slate-400 font-mono">v{b.version}</span>
+                      <span className="text-slate-600 flex-1 text-[10px]">{fmtDate(b.created_at)}</span>
+                      <button onClick={async () => {
+                        if (!(await ipc.confirm(`Restore configuration backup v${b.version} (${fmtDate(b.created_at)}) to this device? Current settings will be overwritten.`))) return;
+                        try {
+                          const ok = await ipc.restoreConfig(detail.id, b.id);
+                          toast(ok ? `Backup v${b.version} restored.` : 'Device rejected the restore.', ok ? 'success' : 'error');
+                        } catch (e: any) { toast(`Restore failed: ${e.message || e}`, 'error'); }
+                      }} className="text-slate-500 hover:text-emerald-400">Restore</button>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <p className="text-[10px] text-slate-600">No backups yet. Use "Backup now" or enable the scheduled backup on the Configuration page.</p>
+              )}
+            </div>
+          )}
+
           {/* Actions */}
           <div className="p-4 border-t border-slate-800 space-y-2 flex-shrink-0">
             <button onClick={() => handleTestConnection(detail.id)} disabled={testing || !detail.credential_id}
@@ -632,6 +687,55 @@ export default function DevicesPage() {
               className="w-full px-3 py-2 bg-red-900/60 text-red-300 text-xs rounded-lg hover:bg-red-800 disabled:opacity-40 disabled:cursor-not-allowed">Factory Reset</button>
             <button onClick={() => handleDelete(detail.id)}
               className="w-full px-3 py-2 bg-red-700/60 text-red-200 text-xs rounded-lg hover:bg-red-700">Delete Device</button>
+          </div>
+        </div>
+      )}
+
+      {/* Batch NTP modal */}
+      {ntpModal && (
+        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50" onClick={() => setNtpModal(false)}>
+          <div className="bg-slate-900 border border-slate-700 rounded-xl p-5 w-[24rem] shadow-2xl" onClick={e => e.stopPropagation()}>
+            <h3 className="text-sm font-semibold text-white mb-1">NTP Time Sync</h3>
+            <p className="text-xs text-slate-500 mb-4">{selected.size} device(s) selected</p>
+            <div className="flex gap-2 mb-4">
+              <button onClick={() => setNtpForm({ ...ntpForm, enabled: true })}
+                className={`flex-1 px-3 py-2 text-xs rounded-lg border ${ntpForm.enabled
+                  ? 'bg-sky-700 border-sky-500 text-white'
+                  : 'bg-slate-800 border-slate-700 text-slate-400 hover:text-white'}`}>
+                Enable NTP
+              </button>
+              <button onClick={() => setNtpForm({ ...ntpForm, enabled: false })}
+                className={`flex-1 px-3 py-2 text-xs rounded-lg border ${!ntpForm.enabled
+                  ? 'bg-sky-700 border-sky-500 text-white'
+                  : 'bg-slate-800 border-slate-700 text-slate-400 hover:text-white'}`}>
+                Disable NTP
+              </button>
+            </div>
+            {ntpForm.enabled ? (
+              <div className="flex items-center gap-2 mb-4">
+                <span className="text-xs text-slate-500 w-24 flex-shrink-0">Timezone</span>
+                <select value={ntpForm.timezone} onChange={e => setNtpForm({ ...ntpForm, timezone: e.target.value })}
+                  className="flex-1 px-2 py-1.5 bg-slate-800 border border-slate-700 rounded text-sm text-white">
+                  {Array.from({ length: 25 }, (_, i) => {
+                    const off = i - 12;
+                    const v = `UTC${off >= 0 ? '+' : ''}${off}`;
+                    return <option key={v} value={v}>{v}{v === 'UTC-3' ? ' (Brasília)' : ''}</option>;
+                  })}
+                </select>
+              </div>
+            ) : (
+              <p className="text-xs text-amber-400/90 mb-4">
+                Devices will stop syncing time automatically — use "Sync Date/Time" manually when needed.
+              </p>
+            )}
+            <div className="flex justify-end gap-2">
+              <button onClick={() => setNtpModal(false)}
+                className="px-3 py-1.5 bg-slate-800 text-slate-300 text-xs rounded-lg hover:bg-slate-700">Cancel</button>
+              <button onClick={applyNtp}
+                className="px-4 py-1.5 bg-emerald-600 text-white text-xs rounded-lg hover:bg-emerald-700">
+                Apply to {selected.size}
+              </button>
+            </div>
           </div>
         </div>
       )}

@@ -4,6 +4,7 @@ import fs from 'fs';
 import { query, queryOne, run, count, insertAndReturn, nowLocal } from '../db/queries';
 import { discoveryService } from '../services/discovery.service';
 import { jobService } from '../services/job.service';
+import { schedulerService } from '../services/scheduler.service';
 import { adapterRegistry } from '../adapters/registry';
 import { encrypt, decrypt } from '../utils/encryption';
 import { DeviceConnection } from '../types';
@@ -609,6 +610,46 @@ export function registerIpcHandlers(getWindow: () => BrowserWindow | null): void
         [uuid(), 'config_restore', 'config', deviceId, device.name, `Restored from backup v${backup.version}`, 'warning']);
     }
     return ok;
+  });
+
+  // ─── App settings (scheduled backup) ────────────────────────────
+
+  const SETTABLE_KEYS = new Set(['backup_enabled', 'backup_hour', 'backup_retention']);
+
+  ipcMain.handle('settings:get-all', () => {
+    const rows = query('SELECT key, value FROM app_settings');
+    return Object.fromEntries(rows.map((r: any) => [r.key, r.value]));
+  });
+
+  ipcMain.handle('settings:set', (_e, { key, value }: { key: string; value: string }) => {
+    if (!SETTABLE_KEYS.has(key)) throw new Error(`Setting not allowed: ${key}`);
+    schedulerService.setSetting(key, String(value));
+  });
+
+  // ─── Batch NTP ──────────────────────────────────────────────────
+
+  // Enable/disable NTP time sync and set the timezone fleet-wide. The API's
+  // ntp module has exactly these two fields (enabled "0"/"1", timezone
+  // "UTC-12".."UTC+12") — there is no NTP server address field.
+  ipcMain.handle('batch:set-ntp', async (_e, { deviceIds, enabled, timezone }: { deviceIds: string[]; enabled: boolean; timezone: string }) => {
+    if (enabled && !/^UTC[+-]\d{1,2}(:\d{2})?$/.test(timezone)) {
+      throw new Error('Timezone must be in the form UTC-3 / UTC+5:30');
+    }
+    const config = enabled
+      ? { ntp: { enabled: '1', timezone } }
+      : { ntp: { enabled: '0' } };
+    return jobService.createJob('batch_config',
+      `${enabled ? `Enable NTP (${timezone})` : 'Disable NTP'} on ${deviceIds.length} device(s)`, deviceIds,
+      async (conn, device) => {
+        const adapter = adapterRegistry.get(device.manufacturer);
+        if (!adapter) throw new Error('No adapter');
+        const ok = await adapter.setConfig(conn, config);
+        if (!ok) throw new Error('Device rejected the NTP configuration');
+        run(`INSERT INTO audit_logs (id, action, category, device_id, device_name, details, severity, created_at) VALUES (?,?,?,?,?,?,?,?)`,
+          [uuid(), 'ntp_configured', 'config', device.id, device.name,
+           enabled ? `NTP enabled, timezone ${timezone}` : 'NTP disabled', 'info', nowLocal()]);
+        return enabled ? `NTP enabled (${timezone})` : 'NTP disabled';
+      }, getWindow());
   });
 
   // ─── Configuration editor & templates ───────────────────────────

@@ -33,6 +33,12 @@ export const ipc = {
   batchBackup: (ids: string[]) => window.api.invoke('batch:backup', ids),
   batchChangeCredentials: (deviceIds: string[], newUsername: string, newPassword: string, country?: string) =>
     window.api.invoke('batch:change-credentials', { deviceIds, newUsername, newPassword, country }),
+  batchSetNtp: (deviceIds: string[], enabled: boolean, timezone: string) =>
+    window.api.invoke('batch:set-ntp', { deviceIds, enabled, timezone }),
+
+  // App settings
+  getSettings: () => window.api.invoke('settings:get-all'),
+  setSetting: (key: string, value: string) => window.api.invoke('settings:set', { key, value }),
 
   // Discovery
   startScan: (request: any) => window.api.invoke('discovery:scan', request),

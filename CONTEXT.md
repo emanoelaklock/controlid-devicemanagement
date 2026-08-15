@@ -46,6 +46,9 @@ Electron 32 | React 18 | Tailwind CSS (dark) | Vite 5 | sql.js (SQLite WASM) | I
 | Templates de configuração (padronização em lote) | ✅ v2.2 — reintroduzido (a causa da remoção na v2.1, get/set_configuration "quebrados", era a sessão via cookie — corrigida) |
 | Compliance check (diff dispositivo × template) | ✅ v2.2 — job; não conforme = item FAILED com as diferenças |
 | Editor de configuração ao vivo (modal no device) | ✅ v2.2 — catálogo de 26 módulos, aplica só campos alterados |
+| Backup agendado diário + retenção por device | ✅ v2.2 — scheduler.service, settings na página Configuration |
+| Lista de backups + Restore no painel do device | ✅ v2.2 |
+| NTP em lote (habilitar/desabilitar + fuso) | ✅ v2.2 — módulo ntp só tem enabled/timezone; NÃO há campo de servidor NTP na API |
 | Auto-update via GitHub Releases (electron-updater) | ✅ v2.1 (requer releases publicados) |
 | Network Config remoto (DHCP / IP fixo, modal) | ✅ v2.1 — via set_system_network.fcgi |
 | People management | ❌ Removido (via web) |
@@ -147,6 +150,24 @@ Construído sobre `controlid.catalog.ts` (26 módulos; agora bundlado também no
   no JSON; tudo vira string ("1"/"0") — o formato que set_configuration exige.
 - Componente compartilhado `renderer/components/ConfigEditor.tsx` (template +
   editor ao vivo usam o mesmo).
+
+## v2.2 — Backup agendado + NTP em lote
+
+- **Backup agendado** (`services/scheduler.service.ts`): poll de 1 min; semântica
+  "roda 1×/dia, na hora configurada ou depois, enquanto o app estiver aberto"
+  (é um app desktop — cron real não faria sentido). Configuração na tabela
+  `app_settings` (backup_enabled/hour/retention/last_run), UI no card
+  "Scheduled Backup" da página Configuration. Cada execução é um job
+  `config_backup` sobre todos os devices com credencial; retenção apaga backups
+  além dos N mais novos por device; backup vazio (`{}`) vira item FAILED
+  (guarda contra o bug antigo de salvar `{}`).
+- **Backups no painel do device**: lista com versão/data, "Backup now" e
+  **Restore** (o handler `config:restore` existia sem botão desde a v2.0).
+- **NTP em lote** (`batch:set-ntp` → job `batch_config`): modal na barra de
+  seleção do Devices. O módulo `ntp` da API tem SÓ `enabled` ("0"/"1") e
+  `timezone` ("UTC-12".."UTC+12") — não existe campo de servidor NTP (doc
+  oficial conferida). Campo timezone do catálogo virou enum UTC-12..UTC+12.
+- `settings:get-all`/`settings:set` (whitelist de chaves) no IPC.
 
 ## v2.1 — Bugs corrigidos
 

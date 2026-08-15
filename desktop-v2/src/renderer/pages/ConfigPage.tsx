@@ -22,8 +22,20 @@ export default function ConfigPage() {
   const [devices, setDevices] = useState<any[]>([]);
   const [picked, setPicked] = useState<Set<string>>(new Set());
 
+  // Scheduled backup settings (stored in app_settings, read by the scheduler)
+  const [sched, setSched] = useState({ backup_enabled: '0', backup_hour: '3', backup_retention: '10', backup_last_run: '' });
+
   const loadList = () => ipc.listTemplates().then(setTemplates);
-  useEffect(() => { loadList(); }, []);
+  useEffect(() => {
+    loadList();
+    ipc.getSettings().then((s: any) => setSched(prev => ({ ...prev, ...s })));
+  }, []);
+
+  const updateSched = async (key: string, value: string) => {
+    setSched(prev => ({ ...prev, [key]: value }));
+    try { await ipc.setSetting(key, value); }
+    catch (e: any) { toast(`Could not save setting: ${e.message || e}`, 'error'); }
+  };
 
   const openTemplate = async (id: string) => {
     const t = await ipc.getTemplate(id);
@@ -114,6 +126,44 @@ export default function ConfigPage() {
               No templates yet. Create one here, or open a device's configuration
               on the Devices page and use "Save as Template".
             </p>
+          )}
+        </div>
+
+        {/* Scheduled backup */}
+        <div className="p-3 border-t border-slate-800 space-y-2">
+          <div className="flex items-center justify-between">
+            <span className="text-xs text-slate-500 uppercase tracking-wide font-semibold">Scheduled Backup</span>
+            <button onClick={() => updateSched('backup_enabled', sched.backup_enabled === '1' ? '0' : '1')}
+              className={`w-9 h-5 rounded-full relative transition-colors ${sched.backup_enabled === '1' ? 'bg-emerald-600' : 'bg-slate-700'}`}>
+              <span className={`absolute top-0.5 w-4 h-4 rounded-full bg-white transition-all ${sched.backup_enabled === '1' ? 'left-4' : 'left-0.5'}`} />
+            </button>
+          </div>
+          <p className="text-[10px] text-slate-600 leading-snug">
+            Backs up the configuration of every device with a credential once a day
+            (at or after the hour below, while the app is open).
+          </p>
+          <div className="flex items-center gap-2">
+            <span className="text-xs text-slate-500 w-20">Run at</span>
+            <select value={sched.backup_hour} onChange={e => updateSched('backup_hour', e.target.value)}
+              disabled={sched.backup_enabled !== '1'}
+              className="flex-1 px-2 py-1 bg-slate-800 border border-slate-700 rounded text-xs text-white disabled:opacity-40">
+              {Array.from({ length: 24 }, (_, h) => (
+                <option key={h} value={String(h)}>{String(h).padStart(2, '0')}:00</option>
+              ))}
+            </select>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="text-xs text-slate-500 w-20">Keep last</span>
+            <select value={sched.backup_retention} onChange={e => updateSched('backup_retention', e.target.value)}
+              disabled={sched.backup_enabled !== '1'}
+              className="flex-1 px-2 py-1 bg-slate-800 border border-slate-700 rounded text-xs text-white disabled:opacity-40">
+              {['3', '5', '10', '20', '30', '50'].map(n => (
+                <option key={n} value={n}>{n} backups/device</option>
+              ))}
+            </select>
+          </div>
+          {sched.backup_last_run && (
+            <p className="text-[10px] text-slate-600">Last run: {sched.backup_last_run}</p>
           )}
         </div>
       </div>

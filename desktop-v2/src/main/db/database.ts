@@ -161,6 +161,13 @@ function createSchema(): void {
   `);
 
   _db.run(`
+    CREATE TABLE IF NOT EXISTS app_settings (
+      key TEXT PRIMARY KEY NOT NULL,
+      value TEXT NOT NULL
+    )
+  `);
+
+  _db.run(`
     CREATE TABLE IF NOT EXISTS config_templates (
       id TEXT PRIMARY KEY NOT NULL,
       name TEXT NOT NULL,

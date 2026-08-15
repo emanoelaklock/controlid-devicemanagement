@@ -3,6 +3,7 @@ import path from 'path';
 import { initDatabase } from './db/database';
 import { registerIpcHandlers } from './ipc/handlers';
 import { heartbeatService } from './services/heartbeat.service';
+import { schedulerService } from './services/scheduler.service';
 
 // Control iD devices use self-signed SSL certificates.
 // Without this, all HTTPS requests to devices will fail with CERT errors.
@@ -76,6 +77,7 @@ app.whenReady().then(async () => {
     registerIpcHandlers(() => mainWindow);
     createWindow();
     heartbeatService.start(() => mainWindow, 5000); // Check every 5 seconds
+    schedulerService.start(() => mainWindow); // Daily scheduled config backup
     setupAutoUpdater();
   } catch (error) {
     console.error('Failed to start:', error);

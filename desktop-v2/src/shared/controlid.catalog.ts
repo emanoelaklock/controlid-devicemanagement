@@ -193,7 +193,12 @@ export const CONFIG_CATALOG: CatalogModule[] = [
     label: 'NTP / Horário',
     fields: [
       { key: 'enabled', label: 'Sincronização NTP', type: ONOFF },
-      { key: 'timezone', label: 'Fuso horário (UTC-12 a UTC+12)' },
+      { key: 'timezone', label: 'Fuso horário', type: 'enum', options:
+        Array.from({ length: 25 }, (_, i) => {
+          const off = i - 12; // UTC-12 .. UTC+12
+          const v = `UTC${off >= 0 ? '+' : ''}${off}`;
+          return { value: v, label: v };
+        }) },
     ],
   },
   {
