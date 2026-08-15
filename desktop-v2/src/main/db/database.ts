@@ -220,6 +220,34 @@ function createSchema(): void {
   // 0 = audited and factory login rejected.
   try { _db.run(`ALTER TABLE devices ADD COLUMN factory_credentials INTEGER`); } catch { /* already exists */ }
 
+  // config_templates: databases created before v2.2 have an incompatible shape
+  // (manufacturer NOT NULL, no description) that breaks the whole Templates
+  // feature with "no such column: description". Rebuild it in the current
+  // shape, keeping whatever rows exist.
+  try {
+    const info = _db.exec(`PRAGMA table_info(config_templates)`);
+    const cols = info[0] ? info[0].values.map((v: any[]) => String(v[1])) : [];
+    if (cols.length > 0 && !cols.includes('description')) {
+      console.log('[DB] Migrating config_templates to the v2.2 shape');
+      _db.run(`ALTER TABLE config_templates RENAME TO config_templates_old`);
+      _db.run(`
+        CREATE TABLE config_templates (
+          id TEXT PRIMARY KEY NOT NULL,
+          name TEXT NOT NULL,
+          description TEXT,
+          config TEXT NOT NULL DEFAULT '{}',
+          created_at TEXT NOT NULL DEFAULT (datetime('now','localtime')),
+          updated_at TEXT NOT NULL DEFAULT (datetime('now','localtime'))
+        )
+      `);
+      _db.run(`INSERT INTO config_templates (id, name, config, created_at, updated_at)
+        SELECT id, name, config, created_at, updated_at FROM config_templates_old`);
+      _db.run(`DROP TABLE config_templates_old`);
+    }
+  } catch (err) {
+    console.warn('[DB] config_templates migration failed:', err);
+  }
+
   _db.run(`CREATE INDEX IF NOT EXISTS idx_devices_status ON devices(status)`);
   _db.run(`CREATE INDEX IF NOT EXISTS idx_devices_ip ON devices(ip_address)`);
   _db.run(`CREATE INDEX IF NOT EXISTS idx_audit_logs_created ON audit_logs(created_at)`);
