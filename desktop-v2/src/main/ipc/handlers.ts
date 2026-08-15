@@ -640,7 +640,7 @@ export function registerIpcHandlers(getWindow: () => BrowserWindow | null): void
   // the result briefly instead of recomputing per caller.
   let healthCache: { ts: number; data: Record<string, any> } | null = null;
 
-  ipcMain.handle('devices:health', () => {
+  const computeDevicesHealth = (): Record<string, any> => {
     if (healthCache && Date.now() - healthCache.ts < 4000) return healthCache.data;
     // Timestamps in connection_history are local time ("YYYY-MM-DD HH:MM:SS").
     const parseLocal = (s: string): number => {
@@ -716,7 +716,9 @@ export function registerIpcHandlers(getWindow: () => BrowserWindow | null): void
     }
     healthCache = { ts: Date.now(), data: health };
     return health;
-  });
+  };
+
+  ipcMain.handle('devices:health', () => computeDevicesHealth());
 
   // ─── Dashboard ──────────────────────────────────────────────────
 
@@ -1303,7 +1305,10 @@ export function registerIpcHandlers(getWindow: () => BrowserWindow | null): void
 
   // ─── Export ────────────────────────────────────────────────────
 
-  ipcMain.handle('export:devices-csv', async () => {
+  // liveNet: the renderer's cache of per-device live network info (netmask/
+  // gateway/DNS read from system_information.fcgi) — those values only exist
+  // on the device, so devices never queried in this session export blank.
+  ipcMain.handle('export:devices-csv', async (_e, liveNet?: Record<string, any>) => {
     const win = getWindow();
     if (!win) return false;
 
@@ -1318,18 +1323,28 @@ export function registerIpcHandlers(getWindow: () => BrowserWindow | null): void
     const devices = query(`SELECT d.*, c.name as credential_name, g.name as group_name
       FROM devices d LEFT JOIN credentials c ON d.credential_id = c.id
       LEFT JOIN device_groups g ON d.group_id = g.id ORDER BY d.name ASC`);
+    const health = computeDevicesHealth();
 
     const headers = ['Name', 'IP Address', 'Port', 'Model', 'Serial Number', 'MAC Address',
       'Firmware', 'Status', 'Manufacturer', 'Hostname', 'HTTPS', 'DHCP', 'Credential',
-      'Group', 'Last Heartbeat', 'Notes'];
+      'Group', 'Last Heartbeat', 'Notes', 'Tags', 'Last Seen', 'Added', 'Updated',
+      'Uptime 7d (%)', 'Drops 24h', 'Drops 7d', 'Netmask', 'Gateway', 'DNS Primary', 'DNS Secondary'];
 
-    const rows = devices.map((d: any) => [
-      d.name, d.ip_address, d.port, d.model, d.serial_number, d.mac_address,
-      d.firmware_version, d.status, d.manufacturer, d.hostname,
-      d.https_enabled ? 'Yes' : 'No', d.dhcp_enabled ? 'Yes' : 'No',
-      d.credential_name || '', d.group_name || '',
-      d.last_heartbeat || '', d.notes || '',
-    ]);
+    const rows = devices.map((d: any) => {
+      const h = health[d.id];
+      const net = liveNet?.[d.id] || {};
+      return [
+        d.name, d.ip_address, d.port, d.model, d.serial_number, d.mac_address,
+        d.firmware_version, d.status, d.manufacturer, d.hostname,
+        d.https_enabled ? 'Yes' : 'No', d.dhcp_enabled ? 'Yes' : 'No',
+        d.credential_name || '', d.group_name || '',
+        d.last_heartbeat || '', d.notes || '', d.tags || '',
+        d.last_seen || '', d.created_at || '', d.updated_at || '',
+        h ? h.availability_7d : '', h ? h.drops_24h : '', h ? h.drops_7d : '',
+        net.netmask || '', net.gateway || '',
+        net.primary_dns || net.dns_primary || '', net.secondary_dns || net.dns_secondary || '',
+      ];
+    });
 
     const escape = (v: any) => {
       const s = String(v ?? '');
