@@ -28,6 +28,8 @@ export default function DevicesPage() {
   const [netForm, setNetForm] = useState({ dhcp: false, ip: '', netmask: '255.255.255.0', gateway: '', primary_dns: '', secondary_dns: '' });
   const [ntpModal, setNtpModal] = useState(false);
   const [ntpForm, setNtpForm] = useState({ enabled: true, timezone: 'UTC-3' });
+  const [hardenModal, setHardenModal] = useState(false);
+  const [hardenForm, setHardenForm] = useState<{ https: 'enable' | 'disable' | 'keep'; ssh: 'enable' | 'disable' | 'keep' }>({ https: 'keep', ssh: 'disable' });
   const [backups, setBackups] = useState<any[]>([]);
   const [cfgModal, setCfgModal] = useState(false);
   const [cfgLoading, setCfgLoading] = useState(false);
@@ -254,6 +256,27 @@ export default function DevicesPage() {
     } catch (e: any) { toast(`NTP job failed to start: ${e.message || e}`, 'error'); }
   };
 
+  const applyHarden = async () => {
+    if (hardenForm.https === 'keep' && hardenForm.ssh === 'keep') { toast('Nothing selected to change.', 'warning'); return; }
+    const parts: string[] = [];
+    if (hardenForm.https !== 'keep') parts.push(`HTTPS: ${hardenForm.https}`);
+    if (hardenForm.ssh !== 'keep') parts.push(`SSH: ${hardenForm.ssh}`);
+    if (!(await ipc.confirm(`Apply to ${selected.size} device(s)? ${parts.join(', ')}. Enabling HTTPS moves devices to port 443 and briefly drops their connection.`))) return;
+    try {
+      await ipc.batchHarden(Array.from(selected), hardenForm.https, hardenForm.ssh);
+      toast('Hardening job started — see Tasks page.', 'info');
+      setHardenModal(false);
+      setSelected(new Set());
+    } catch (e: any) { toast(`Hardening failed to start: ${e.message || e}`, 'error'); }
+  };
+
+  const handleBatchAudit = async () => {
+    await ipc.securityAudit(Array.from(selected));
+    toast('Factory-credential audit started — flagged devices show as FAILED on the Tasks page.', 'info');
+    setSelected(new Set());
+    setTimeout(load, 2000);
+  };
+
   const handleBatchRepairFirmware = async () => {
     if (!(await ipc.confirm(`Reinstall firmware on ${selected.size} device(s) via recovery mode? Devices are processed ONE AT A TIME and each stays offline for several minutes. Settings and users are kept.`))) return;
     await ipc.firmwareRepair(Array.from(selected));
@@ -358,6 +381,8 @@ export default function DevicesPage() {
               <button onClick={handleBatchReboot} className="px-3 py-1.5 bg-amber-600 text-white text-xs rounded-lg hover:bg-amber-700">Reboot</button>
               <button onClick={handleBatchRepairFirmware} className="px-3 py-1.5 bg-rose-700 text-white text-xs rounded-lg hover:bg-rose-600">Repair FW</button>
               <button onClick={() => setNtpModal(true)} className="px-3 py-1.5 bg-sky-700 text-white text-xs rounded-lg hover:bg-sky-600">Set NTP</button>
+              <button onClick={() => setHardenModal(true)} className="px-3 py-1.5 bg-indigo-700 text-white text-xs rounded-lg hover:bg-indigo-600">Harden</button>
+              <button onClick={handleBatchAudit} className="px-3 py-1.5 bg-slate-600 text-white text-xs rounded-lg hover:bg-slate-500">Audit</button>
             </div>
           )}
           <button onClick={() => ipc.exportDevicesCsv()} className="px-3 py-1.5 bg-slate-700 text-white text-xs rounded-lg hover:bg-slate-600">
@@ -446,6 +471,14 @@ export default function DevicesPage() {
               <span className={`w-2.5 h-2.5 rounded-full ${STATUS_COLORS[detail.status]} animate-pulse`} />
               <span className="text-slate-300 capitalize font-medium">{detail.status}</span>
             </div>
+
+            {/* Factory-credential warning (set by the security audit) */}
+            {detail.factory_credentials === 1 && (
+              <div className="flex items-start gap-2 px-2.5 py-2 bg-red-900/30 border border-red-800/60 rounded-lg">
+                <span className="text-red-400">⚠</span>
+                <p className="text-xs text-red-300">Accepts factory credentials (admin/admin). Use "Set Credentials" to change them.</p>
+              </div>
+            )}
 
             {/* Editable fields */}
             <EditableField label="Name" value={detail.name} field="name" editing={editing} editValue={editValue}
@@ -687,6 +720,42 @@ export default function DevicesPage() {
               className="w-full px-3 py-2 bg-red-900/60 text-red-300 text-xs rounded-lg hover:bg-red-800 disabled:opacity-40 disabled:cursor-not-allowed">Factory Reset</button>
             <button onClick={() => handleDelete(detail.id)}
               className="w-full px-3 py-2 bg-red-700/60 text-red-200 text-xs rounded-lg hover:bg-red-700">Delete Device</button>
+          </div>
+        </div>
+      )}
+
+      {/* Batch hardening modal */}
+      {hardenModal && (
+        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50" onClick={() => setHardenModal(false)}>
+          <div className="bg-slate-900 border border-slate-700 rounded-xl p-5 w-[26rem] shadow-2xl" onClick={e => e.stopPropagation()}>
+            <h3 className="text-sm font-semibold text-white mb-1">Security Hardening</h3>
+            <p className="text-xs text-slate-500 mb-4">{selected.size} device(s) selected</p>
+            {([
+              ['https', 'HTTPS (self-signed)', 'Encrypts the web/API traffic. Enabling moves the device to port 443.'],
+              ['ssh', 'SSH access', 'Shell access to the device. Disable unless you need it.'],
+            ] as const).map(([key, label, hint]) => (
+              <div key={key} className="mb-4">
+                <p className="text-xs text-slate-300 font-medium">{label}</p>
+                <p className="text-[10px] text-slate-600 mb-1.5">{hint}</p>
+                <div className="flex gap-1.5">
+                  {(['enable', 'disable', 'keep'] as const).map(opt => (
+                    <button key={opt} onClick={() => setHardenForm({ ...hardenForm, [key]: opt })}
+                      className={`flex-1 px-2 py-1.5 text-xs rounded-lg border capitalize ${
+                        (hardenForm as any)[key] === opt
+                          ? 'bg-indigo-700 border-indigo-500 text-white'
+                          : 'bg-slate-800 border-slate-700 text-slate-400 hover:text-white'}`}>
+                      {opt === 'keep' ? 'Leave as-is' : opt}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            ))}
+            <div className="flex justify-end gap-2 mt-2">
+              <button onClick={() => setHardenModal(false)}
+                className="px-3 py-1.5 bg-slate-800 text-slate-300 text-xs rounded-lg hover:bg-slate-700">Cancel</button>
+              <button onClick={applyHarden}
+                className="px-4 py-1.5 bg-emerald-600 text-white text-xs rounded-lg hover:bg-emerald-700">Apply to {selected.size}</button>
+            </div>
           </div>
         </div>
       )}

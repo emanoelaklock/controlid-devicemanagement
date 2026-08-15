@@ -159,6 +159,24 @@ export interface DeviceAdapter {
   /** Change device credentials */
   changePassword(connection: DeviceConnection, newUsername: string, newPassword: string): Promise<boolean>;
 
+  // Extended operations (optional — Control iD only for now)
+
+  /** Read the device's network block (ip, netmask, gateway, dns, dhcp, ssl...) */
+  getNetwork?(connection: DeviceConnection): Promise<Record<string, unknown>>;
+
+  /** Change network settings; `changes` is overlaid on the current config */
+  setNetwork?(connection: DeviceConnection, changes: Record<string, unknown>): Promise<boolean>;
+
+  /** First-boot onboarding + credential change (safe on already-set-up devices) */
+  commissionDevice?(connection: DeviceConnection, opts: { newUsername: string; newPassword: string; language?: string; countryCode?: string }):
+    Promise<{ ok: boolean; onboarded: boolean }>;
+
+  /** Force-complete the on-screen setup wizard (language + legal terms) */
+  finishSetup?(connection: DeviceConnection, opts: { language?: string; countryCode?: string }): Promise<boolean>;
+
+  /** Download a device log as plain text */
+  downloadLog?(connection: DeviceConnection, kind: 'diagnostic' | 'audit'): Promise<string>;
+
   // Firmware repair via the device's recovery mode (optional — Control iD only for now)
 
   /** Whether the device is currently in recovery mode (no auth needed) */

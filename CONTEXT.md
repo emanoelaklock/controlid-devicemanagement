@@ -49,6 +49,8 @@ Electron 32 | React 18 | Tailwind CSS (dark) | Vite 5 | sql.js (SQLite WASM) | I
 | Backup agendado diário + retenção por device | ✅ v2.2 — scheduler.service, settings na página Configuration |
 | Lista de backups + Restore no painel do device | ✅ v2.2 |
 | NTP em lote (habilitar/desabilitar + fuso) | ✅ v2.2 — módulo ntp só tem enabled/timezone; NÃO há campo de servidor NTP na API |
+| Hardening em lote (HTTPS self-signed + SSH) | ✅ v2.2 — batch:harden |
+| Auditoria de senha de fábrica + alerta no Dashboard | ✅ v2.2 — security:audit, coluna factory_credentials |
 | Auto-update via GitHub Releases (electron-updater) | ✅ v2.1 (requer releases publicados) |
 | Network Config remoto (DHCP / IP fixo, modal) | ✅ v2.1 — via set_system_network.fcgi |
 | People management | ❌ Removido (via web) |
@@ -168,6 +170,26 @@ Construído sobre `controlid.catalog.ts` (26 módulos; agora bundlado também no
   `timezone` ("UTC-12".."UTC+12") — não existe campo de servidor NTP (doc
   oficial conferida). Campo timezone do catálogo virou enum UTC-12..UTC+12.
 - `settings:get-all`/`settings:set` (whitelist de chaves) no IPC.
+
+## v2.2 — Hardening em lote + auditoria de senha de fábrica
+
+- **`batch:harden`** (job `batch_config`): modal "Harden" na barra de seleção do
+  Devices, com HTTPS (self-signed) e SSH em enable/disable/leave-as-is.
+  - SSH via `set_configuration {general:{ssh_enabled}}`; aplicado PRIMEIRO.
+  - HTTPS via `setNetwork` (`ssl_enabled`+`self_signed_certificate`+
+    `web_server_port`); aplicado por ÚLTIMO porque muda o device p/ 443 e derruba
+    a conexão. Como o app deriva o protocolo da porta, fixa web_server_port=443
+    (ou 80 ao desabilitar) e atualiza `devices.port`/`https_enabled`.
+- **`security:audit`** (job `health_check`): tenta admin/admin em cada device.
+  Aceitou → `devices.factory_credentials=1`, item FAILED + audit `critical`.
+  Rejeitou mas device offline (probe falha) → não audita (não marca como seguro).
+  Rejeitou e online → `factory_credentials=0`.
+  - Nova coluna `devices.factory_credentials` (migração via ALTER TABLE no
+    init; NULL=nunca auditado). Alerta vermelho no painel do device e item
+    `critical` no card Security Posture do Dashboard.
+- Métodos estendidos do adapter (getNetwork/setNetwork/commissionDevice/
+  finishSetup/downloadLog) agora declarados como opcionais na interface
+  `DeviceAdapter` (antes acessados via `as any` nos handlers).
 
 ## v2.1 — Bugs corrigidos
 

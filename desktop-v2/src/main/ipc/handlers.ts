@@ -626,6 +626,71 @@ export function registerIpcHandlers(getWindow: () => BrowserWindow | null): void
     schedulerService.setSetting(key, String(value));
   });
 
+  // ─── Security hardening ─────────────────────────────────────────
+
+  // Batch hardening: HTTPS (self-signed cert via set_system_network) and SSH
+  // (general.ssh_enabled). SSH is applied first — enabling HTTPS moves the
+  // device to port 443 and drops the current connection, so it goes last.
+  // The app model derives the protocol from the port, so HTTPS pins
+  // web_server_port to 443 (and disable pins it back to 80) and updates the
+  // device row to match.
+  ipcMain.handle('batch:harden', async (_e, { deviceIds, https, ssh }:
+      { deviceIds: string[]; https: 'enable' | 'disable' | 'keep'; ssh: 'enable' | 'disable' | 'keep' }) => {
+    if (https === 'keep' && ssh === 'keep') throw new Error('Nothing selected to change');
+    return jobService.createJob('batch_config', `Harden ${deviceIds.length} device(s)`, deviceIds,
+      async (conn, device) => {
+        const adapter = adapterRegistry.get(device.manufacturer);
+        if (!adapter) throw new Error('No adapter');
+        const done: string[] = [];
+        if (ssh !== 'keep') {
+          const ok = await adapter.setConfig(conn, { general: { ssh_enabled: ssh === 'enable' ? '1' : '0' } });
+          if (!ok) throw new Error('Device rejected the SSH setting');
+          done.push(ssh === 'enable' ? 'SSH enabled' : 'SSH disabled');
+        }
+        if (https !== 'keep') {
+          if (!adapter.setNetwork) throw new Error('Adapter does not support network changes');
+          const enable = https === 'enable';
+          await adapter.setNetwork(conn, {
+            ssl_enabled: enable,
+            self_signed_certificate: enable,
+            web_server_port: enable ? 443 : 80,
+          });
+          run(`UPDATE devices SET port=?, https_enabled=?, status='offline', updated_at='${nowLocal()}' WHERE id=?`,
+            [enable ? 443 : 80, enable ? 1 : 0, device.id]);
+          done.push(enable ? 'HTTPS enabled (self-signed, port 443)' : 'HTTPS disabled (port 80)');
+        }
+        run(`INSERT INTO audit_logs (id, action, category, device_id, device_name, details, severity, created_at) VALUES (?,?,?,?,?,?,?,?)`,
+          [uuid(), 'device_hardened', 'device', device.id, device.name, done.join('; '), 'warning', nowLocal()]);
+        return done.join('; ');
+      }, getWindow());
+  });
+
+  // Factory-credential audit: try admin/admin against each device. A device
+  // that accepts it is flagged (factory_credentials=1) and its job item FAILS
+  // so it stands out; an unreachable device is left un-audited (NULL/previous
+  // value) rather than wrongly marked safe.
+  ipcMain.handle('security:audit', async (_e, deviceIds: string[]) => {
+    return jobService.createJob('health_check', `Factory-credential audit on ${deviceIds.length} device(s)`, deviceIds,
+      async (_conn, device) => {
+        const adapter = adapterRegistry.get(device.manufacturer);
+        if (!adapter) throw new Error('No adapter');
+        const factoryInfo = await adapter.authenticate(device.ip_address, device.port, 'admin', 'admin');
+        if (factoryInfo) {
+          run(`UPDATE devices SET factory_credentials=1, updated_at='${nowLocal()}' WHERE id=?`, [device.id]);
+          run(`INSERT INTO audit_logs (id, action, category, device_id, device_name, details, severity, created_at) VALUES (?,?,?,?,?,?,?,?)`,
+            [uuid(), 'factory_credentials', 'device', device.id, device.name,
+             'Device still accepts factory credentials (admin/admin)', 'critical', nowLocal()]);
+          throw new Error('FACTORY CREDENTIALS ACCEPTED — use "Set Credentials" to change them');
+        }
+        // admin/admin rejected — make sure that's a real rejection, not the
+        // device being offline.
+        const reachable = await adapter.probe(device.ip_address, device.port, 6000);
+        if (!reachable) throw new Error('Unreachable — not audited');
+        run(`UPDATE devices SET factory_credentials=0, updated_at='${nowLocal()}' WHERE id=?`, [device.id]);
+        return 'OK — factory credentials rejected';
+      }, getWindow());
+  });
+
   // ─── Batch NTP ──────────────────────────────────────────────────
 
   // Enable/disable NTP time sync and set the timezone fleet-wide. The API's

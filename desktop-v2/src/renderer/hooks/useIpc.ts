@@ -35,6 +35,9 @@ export const ipc = {
     window.api.invoke('batch:change-credentials', { deviceIds, newUsername, newPassword, country }),
   batchSetNtp: (deviceIds: string[], enabled: boolean, timezone: string) =>
     window.api.invoke('batch:set-ntp', { deviceIds, enabled, timezone }),
+  batchHarden: (deviceIds: string[], https: 'enable' | 'disable' | 'keep', ssh: 'enable' | 'disable' | 'keep') =>
+    window.api.invoke('batch:harden', { deviceIds, https, ssh }),
+  securityAudit: (deviceIds: string[]) => window.api.invoke('security:audit', deviceIds),
 
   // App settings
   getSettings: () => window.api.invoke('settings:get-all'),

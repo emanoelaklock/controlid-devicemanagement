@@ -214,6 +214,12 @@ function createSchema(): void {
     )
   `);
 
+  // Lightweight migrations: CREATE TABLE IF NOT EXISTS doesn't alter existing
+  // tables, so columns added after v2.0 are bolted on here (no-op once applied).
+  // devices.factory_credentials: NULL = never audited, 1 = accepts admin/admin,
+  // 0 = audited and factory login rejected.
+  try { _db.run(`ALTER TABLE devices ADD COLUMN factory_credentials INTEGER`); } catch { /* already exists */ }
+
   _db.run(`CREATE INDEX IF NOT EXISTS idx_devices_status ON devices(status)`);
   _db.run(`CREATE INDEX IF NOT EXISTS idx_devices_ip ON devices(ip_address)`);
   _db.run(`CREATE INDEX IF NOT EXISTS idx_audit_logs_created ON audit_logs(created_at)`);

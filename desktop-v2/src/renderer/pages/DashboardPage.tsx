@@ -20,6 +20,7 @@ export default function DashboardPage() {
 
   // Security analysis
   const noCredential = devices.filter(d => !d.credential_id);
+  const factoryCreds = devices.filter(d => d.factory_credentials === 1);
   const noHttps = devices.filter(d => !d.https_enabled && d.status === 'online');
   const firmwareVersions = new Map<string, any[]>();
   devices.forEach(d => {
@@ -43,6 +44,7 @@ export default function DashboardPage() {
   ];
 
   const securityIssues = [
+    ...factoryCreds.length > 0 ? [{ severity: 'critical' as const, text: `${factoryCreds.length} device(s) still using factory credentials (admin/admin)`, detail: factoryCreds.map(d => d.name).join(', ') }] : [],
     ...noCredential.length > 0 ? [{ severity: 'warning' as const, text: `${noCredential.length} device(s) without credentials`, detail: noCredential.map(d => d.name).join(', ') }] : [],
     ...noHttps.length > 0 ? [{ severity: 'info' as const, text: `${noHttps.length} device(s) without HTTPS`, detail: noHttps.map(d => d.name).join(', ') }] : [],
     ...outdatedFirmware.length > 0 ? [{ severity: 'warning' as const, text: `${outdatedFirmware.length} device(s) with outdated firmware (latest: ${latestFirmware})`, detail: outdatedFirmware.map(d => `${d.name}: ${d.firmware_version}`).join(', ') }] : [],
@@ -112,7 +114,7 @@ export default function DashboardPage() {
               {securityIssues.map((issue, i) => (
                 <div key={i} className="flex items-start gap-2">
                   <span className={`w-2 h-2 rounded-full mt-1.5 flex-shrink-0 ${
-                    issue.severity === 'warning' ? 'bg-amber-500' : 'bg-blue-500'
+                    issue.severity === 'critical' ? 'bg-red-500' : issue.severity === 'warning' ? 'bg-amber-500' : 'bg-blue-500'
                   }`} />
                   <div>
                     <p className="text-sm text-slate-300">{issue.text}</p>
