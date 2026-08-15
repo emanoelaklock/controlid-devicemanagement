@@ -47,6 +47,11 @@
   background: var(--surface-sunken);
 }
 
+@keyframes srPulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: .45; }
+}
+
 @keyframes fadeIn {
   from { opacity: 0; transform: translateY(-4px); }
   to { opacity: 1; transform: translateY(0); }

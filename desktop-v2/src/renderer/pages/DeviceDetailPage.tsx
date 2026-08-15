@@ -502,51 +502,36 @@ export default function DeviceDetailPage({ deviceId, onBack }: { deviceId: strin
         </Modal>
       )}
 
-      {/* Live configuration editor modal — keeps the legacy dark styling of
-          ConfigEditor (shared with the Configuration page) until it migrates. */}
+      {/* Live configuration editor modal */}
       {cfgModal && (
-        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50"
-          onClick={() => { if (!cfgSaving && !cfgLoading) setCfgModal(false); }}>
-          <div className="bg-slate-900 border border-slate-700 rounded-xl w-[46rem] max-h-[85vh] flex flex-col shadow-2xl text-slate-200"
-            onClick={e => e.stopPropagation()}>
-            <div className="px-5 py-4 border-b border-slate-800 flex items-center justify-between">
-              <div>
-                <h3 className="text-sm font-semibold text-white">Device Configuration</h3>
-                <p className="text-xs text-slate-500">{device.name || device.ip_address} · {device.ip_address}:{device.port}</p>
+        <Modal width={720} onClose={() => { if (!cfgSaving && !cfgLoading) setCfgModal(false); }}>
+          <ModalTitle sub={`${device.name || device.ip_address} · ${device.ip_address}:${device.port}`}>Device configuration</ModalTitle>
+          {cfgLoading ? (
+            <p style={{ textAlign: 'center', color: 'var(--text-muted)', fontSize: 13, padding: '40px 0' }}>
+              Reading configuration from the device (module by module)…
+            </p>
+          ) : (
+            <>
+              <p style={{ fontSize: 12, color: 'var(--text-muted)', margin: '0 0 12px' }}>
+                Values read live from the device; modules the firmware doesn't support are hidden.
+                Changed fields are marked in amber and only they are sent on Apply.
+              </p>
+              <div style={{ maxHeight: '55vh', overflowY: 'auto' }}>
+                <ConfigEditor values={cfgValues} original={cfgOriginal} emptyHint="—" onlyReported
+                  onChange={(mod, key, value) =>
+                    setCfgValues(c => ({ ...c, [mod]: { ...(c[mod] || {}), [key]: value } }))} />
               </div>
-              <button onClick={() => { if (!cfgSaving) setCfgModal(false); }}
-                className="text-slate-500 hover:text-white text-lg">&times;</button>
-            </div>
-            <div className="flex-1 overflow-auto p-4">
-              {cfgLoading ? (
-                <p className="text-center text-slate-500 text-sm py-12">
-                  Reading configuration from the device (module by module)...
-                </p>
-              ) : (
-                <>
-                  <p className="text-xs text-slate-600 mb-3">
-                    Values read live from the device; modules the firmware doesn't support are hidden.
-                    Changed fields are marked in amber and only they are sent on Apply.
-                  </p>
-                  <ConfigEditor values={cfgValues} original={cfgOriginal} emptyHint="—" onlyReported
-                    onChange={(mod, key, value) =>
-                      setCfgValues(c => ({ ...c, [mod]: { ...(c[mod] || {}), [key]: value } }))} />
-                </>
-              )}
-            </div>
-            <div className="px-5 py-3 border-t border-slate-800 flex items-center gap-2">
-              <button onClick={saveConfigAsTemplate} disabled={cfgLoading}
-                className="px-3 py-1.5 bg-slate-700 text-white text-xs rounded-lg hover:bg-slate-600 disabled:opacity-40">
-                Save as Template</button>
-              <div className="flex-1" />
-              <button onClick={() => setCfgModal(false)} disabled={cfgSaving}
-                className="px-3 py-1.5 bg-slate-800 text-slate-300 text-xs rounded-lg hover:bg-slate-700 disabled:opacity-40">Close</button>
-              <button onClick={applyConfigChanges} disabled={cfgLoading || cfgSaving}
-                className="px-4 py-1.5 bg-emerald-600 text-white text-xs rounded-lg hover:bg-emerald-700 disabled:opacity-40">
-                {cfgSaving ? 'Applying...' : 'Apply changes'}</button>
-            </div>
+            </>
+          )}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 16, paddingTop: 14, borderTop: '1px solid var(--border)' }}>
+            <Button variant="ghost" size="sm" disabled={cfgLoading} onClick={saveConfigAsTemplate}>Save as Template</Button>
+            <div style={{ flex: 1 }} />
+            <Button variant="ghost" size="sm" disabled={cfgSaving} onClick={() => setCfgModal(false)}>Close</Button>
+            <Button variant="green" size="sm" disabled={cfgLoading || cfgSaving} onClick={applyConfigChanges}>
+              {cfgSaving ? 'Applying…' : 'Apply changes'}
+            </Button>
           </div>
-        </div>
+        </Modal>
       )}
     </div>
   );

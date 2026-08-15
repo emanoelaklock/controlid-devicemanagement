@@ -32,11 +32,6 @@ const PAGE_TITLES: Record<Page, string> = {
   audit: 'Audit log',
 };
 
-/** Pages not yet migrated to the redesign keep their original dark styling. */
-function LegacyPage({ children }: { children: React.ReactNode }) {
-  return <div className="min-h-full bg-slate-900 text-slate-200">{children}</div>;
-}
-
 export default function App() {
   const [page, setPage] = useState<Page>('devices');
   const [deviceId, setDeviceId] = useState<string | null>(null);
@@ -52,19 +47,19 @@ export default function App() {
 
   const renderPage = () => {
     switch (page) {
-      case 'dashboard': return <LegacyPage><DashboardPage /></LegacyPage>;
+      case 'dashboard': return <DashboardPage />;
       case 'devices': return <DevicesPage onOpenDevice={openDevice} />;
       case 'device-detail':
         return deviceId
           ? <DeviceDetailPage deviceId={deviceId} onBack={() => setPage('devices')} />
           : <DevicesPage onOpenDevice={openDevice} />;
       case 'connection-health': return <ConnectionHealthPage onOpenDevice={openDevice} />;
-      case 'discovery': return <LegacyPage><DiscoveryPage /></LegacyPage>;
-      case 'firmware': return <LegacyPage><FirmwarePage /></LegacyPage>;
-      case 'config': return <LegacyPage><ConfigPage /></LegacyPage>;
-      case 'jobs': return <LegacyPage><JobsPage /></LegacyPage>;
-      case 'credentials': return <LegacyPage><CredentialsPage /></LegacyPage>;
-      case 'audit': return <LegacyPage><AuditPage /></LegacyPage>;
+      case 'discovery': return <DiscoveryPage />;
+      case 'firmware': return <FirmwarePage />;
+      case 'config': return <ConfigPage />;
+      case 'jobs': return <JobsPage />;
+      case 'credentials': return <CredentialsPage />;
+      case 'audit': return <AuditPage />;
     }
   };
 

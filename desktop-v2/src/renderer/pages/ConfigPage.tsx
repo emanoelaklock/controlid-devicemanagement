@@ -3,6 +3,7 @@ import { ipc } from '../hooks/useIpc';
 import { fmtDate } from '../utils/date';
 import { toast } from '../components/Toast';
 import ConfigEditor, { ConfigValues, countFields, stripEmpty } from '../components/ConfigEditor';
+import { Button, Card, Eyebrow, Modal, ModalTitle, Select, StateBlock, TextInput } from '../components/ui';
 
 /**
  * Configuration templates: friendly catalog-driven editor over
@@ -103,93 +104,102 @@ export default function ConfigPage() {
   const fieldCount = countFields(config);
 
   return (
-    <div className="flex h-full">
-      {/* Template list */}
-      <div className="w-64 border-r border-slate-800 bg-slate-900/50 flex flex-col flex-shrink-0">
-        <div className="px-3 py-3 border-b border-slate-800 flex items-center justify-between">
-          <span className="text-xs text-slate-500 uppercase tracking-wide font-semibold">Templates</span>
-          <button onClick={newTemplate} className="text-xs text-brand-400 hover:text-brand-300">+ New</button>
-        </div>
-        <div className="flex-1 overflow-auto p-2 space-y-0.5">
-          {templates.map(t => (
-            <button key={t.id} onClick={() => openTemplate(t.id)}
-              className={`w-full text-left px-3 py-2 rounded text-xs transition-colors ${
-                selectedId === t.id ? 'bg-brand-600 text-white' : 'text-slate-400 hover:bg-slate-800'}`}>
-              <span className="block truncate font-medium">{t.name}</span>
-              <span className={`block text-[10px] ${selectedId === t.id ? 'text-brand-200' : 'text-slate-600'}`}>
-                {fmtDate(t.updated_at || t.created_at)}
-              </span>
-            </button>
-          ))}
-          {templates.length === 0 && (
-            <p className="px-3 py-6 text-xs text-slate-600">
-              No templates yet. Create one here, or open a device's configuration
-              on the Devices page and use "Save as Template".
+    <div style={{ padding: '18px 28px 28px' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: '260px minmax(0,1fr)', gap: 14, alignItems: 'start' }}>
+        {/* Left column: templates + scheduled backup */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+          <Card style={{ padding: '14px 14px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+              <Eyebrow>Templates</Eyebrow>
+              <Button variant="ghost" size="sm" style={{ padding: '4px 10px' }} onClick={newTemplate}>+ New</Button>
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 3, maxHeight: 380, overflowY: 'auto' }}>
+              {templates.map(t => {
+                const active = selectedId === t.id;
+                return (
+                  <button key={t.id} onClick={() => openTemplate(t.id)} style={{
+                    textAlign: 'left', padding: '8px 10px', borderRadius: 10, border: 'none',
+                    cursor: 'pointer', fontFamily: 'inherit',
+                    background: active ? 'var(--sr-blue)' : 'transparent',
+                    color: active ? '#fff' : 'var(--text)',
+                    boxShadow: active ? 'var(--sr-shadow-pop)' : 'none',
+                    transition: 'background .12s ease',
+                  }}>
+                    <span style={{ display: 'block', fontSize: 12.5, fontWeight: 700, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{t.name}</span>
+                    <span style={{ display: 'block', fontSize: 10.5, marginTop: 1, color: active ? 'rgba(255,255,255,.75)' : 'var(--text-muted)', fontVariantNumeric: 'tabular-nums' }}>
+                      {fmtDate(t.updated_at || t.created_at)}
+                    </span>
+                  </button>
+                );
+              })}
+              {templates.length === 0 && (
+                <p style={{ fontSize: 12, color: 'var(--text-muted)', margin: '6px 2px', lineHeight: 1.5 }}>
+                  No templates yet. Create one here, or open a device's configuration
+                  and use "Save as Template".
+                </p>
+              )}
+            </div>
+          </Card>
+
+          {/* Scheduled backup */}
+          <Card style={{ padding: '14px 14px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+              <Eyebrow>Scheduled backup</Eyebrow>
+              <button onClick={() => updateSched('backup_enabled', sched.backup_enabled === '1' ? '0' : '1')} style={{
+                width: 36, height: 20, borderRadius: 999, position: 'relative', border: 'none', cursor: 'pointer',
+                background: sched.backup_enabled === '1' ? 'var(--sr-green)' : 'var(--surface-sunken)',
+                transition: 'background .12s ease', padding: 0,
+              }}>
+                <span style={{
+                  position: 'absolute', top: 2, width: 16, height: 16, borderRadius: '50%', background: '#fff',
+                  boxShadow: '0 1px 2px rgba(16,24,40,.2)', transition: 'left .12s ease',
+                  left: sched.backup_enabled === '1' ? 18 : 2,
+                }} />
+              </button>
+            </div>
+            <p style={{ fontSize: 11, color: 'var(--text-muted)', margin: '0 0 10px', lineHeight: 1.5 }}>
+              Backs up the configuration of every device with a credential once a day
+              (at or after the hour below, while the app is open).
             </p>
-          )}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+              <span style={{ fontSize: 12, color: 'var(--text-muted)', width: 64, flex: 'none' }}>Run at</span>
+              <Select value={sched.backup_hour} onChange={e => updateSched('backup_hour', e.target.value)}
+                disabled={sched.backup_enabled !== '1'} style={{ flex: 1, opacity: sched.backup_enabled !== '1' ? .5 : 1 }}>
+                {Array.from({ length: 24 }, (_, h) => (
+                  <option key={h} value={String(h)}>{String(h).padStart(2, '0')}:00</option>
+                ))}
+              </Select>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <span style={{ fontSize: 12, color: 'var(--text-muted)', width: 64, flex: 'none' }}>Keep last</span>
+              <Select value={sched.backup_retention} onChange={e => updateSched('backup_retention', e.target.value)}
+                disabled={sched.backup_enabled !== '1'} style={{ flex: 1, opacity: sched.backup_enabled !== '1' ? .5 : 1 }}>
+                {['3', '5', '10', '20', '30', '50'].map(n => (
+                  <option key={n} value={n}>{n} backups/device</option>
+                ))}
+              </Select>
+            </div>
+            {sched.backup_last_run && (
+              <p style={{ fontSize: 10.5, color: 'var(--text-muted)', margin: '8px 0 0', fontVariantNumeric: 'tabular-nums' }}>Last run: {sched.backup_last_run}</p>
+            )}
+          </Card>
         </div>
 
-        {/* Scheduled backup */}
-        <div className="p-3 border-t border-slate-800 space-y-2">
-          <div className="flex items-center justify-between">
-            <span className="text-xs text-slate-500 uppercase tracking-wide font-semibold">Scheduled Backup</span>
-            <button onClick={() => updateSched('backup_enabled', sched.backup_enabled === '1' ? '0' : '1')}
-              className={`w-9 h-5 rounded-full relative transition-colors ${sched.backup_enabled === '1' ? 'bg-emerald-600' : 'bg-slate-700'}`}>
-              <span className={`absolute top-0.5 w-4 h-4 rounded-full bg-white transition-all ${sched.backup_enabled === '1' ? 'left-4' : 'left-0.5'}`} />
-            </button>
-          </div>
-          <p className="text-[10px] text-slate-600 leading-snug">
-            Backs up the configuration of every device with a credential once a day
-            (at or after the hour below, while the app is open).
-          </p>
-          <div className="flex items-center gap-2">
-            <span className="text-xs text-slate-500 w-20">Run at</span>
-            <select value={sched.backup_hour} onChange={e => updateSched('backup_hour', e.target.value)}
-              disabled={sched.backup_enabled !== '1'}
-              className="flex-1 px-2 py-1 bg-slate-800 border border-slate-700 rounded text-xs text-white disabled:opacity-40">
-              {Array.from({ length: 24 }, (_, h) => (
-                <option key={h} value={String(h)}>{String(h).padStart(2, '0')}:00</option>
-              ))}
-            </select>
-          </div>
-          <div className="flex items-center gap-2">
-            <span className="text-xs text-slate-500 w-20">Keep last</span>
-            <select value={sched.backup_retention} onChange={e => updateSched('backup_retention', e.target.value)}
-              disabled={sched.backup_enabled !== '1'}
-              className="flex-1 px-2 py-1 bg-slate-800 border border-slate-700 rounded text-xs text-white disabled:opacity-40">
-              {['3', '5', '10', '20', '30', '50'].map(n => (
-                <option key={n} value={n}>{n} backups/device</option>
-              ))}
-            </select>
-          </div>
-          {sched.backup_last_run && (
-            <p className="text-[10px] text-slate-600">Last run: {sched.backup_last_run}</p>
-          )}
-        </div>
-      </div>
-
-      {/* Editor */}
-      {selectedId ? (
-        <div className="flex-1 flex flex-col min-w-0">
-          <div className="px-4 py-3 border-b border-slate-800 bg-slate-900/50 flex items-center gap-3 flex-shrink-0">
-            <input value={name} onChange={e => { setName(e.target.value); setDirty(true); }}
-              className="px-2 py-1.5 bg-slate-800 border border-slate-700 rounded text-sm text-white font-semibold w-56" />
-            <input value={description} onChange={e => { setDescription(e.target.value); setDirty(true); }}
-              placeholder="Description (optional)"
-              className="flex-1 px-2 py-1.5 bg-slate-800 border border-slate-700 rounded text-sm text-slate-300 min-w-0" />
-            <span className="text-xs text-slate-500 whitespace-nowrap">{fieldCount} field(s) enforced</span>
-            <button onClick={save} disabled={!dirty || saving}
-              className="px-3 py-1.5 bg-emerald-600 text-white text-xs rounded-lg hover:bg-emerald-700 disabled:opacity-40">
-              {saving ? 'Saving...' : 'Save'}</button>
-            <button onClick={() => openPicker('apply')}
-              className="px-3 py-1.5 bg-brand-600 text-white text-xs rounded-lg hover:bg-brand-700">Apply to devices…</button>
-            <button onClick={() => openPicker('compliance')}
-              className="px-3 py-1.5 bg-cyan-700 text-white text-xs rounded-lg hover:bg-cyan-600">Compliance check…</button>
-            <button onClick={remove}
-              className="px-3 py-1.5 bg-red-900/60 text-red-300 text-xs rounded-lg hover:bg-red-800">Delete</button>
-          </div>
-          <div className="flex-1 overflow-auto p-4">
-            <p className="text-xs text-slate-600 mb-3">
+        {/* Editor */}
+        {selectedId ? (
+          <Card style={{ padding: '16px 18px', minWidth: 0 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', paddingBottom: 14, borderBottom: '1px solid var(--border)', marginBottom: 14 }}>
+              <TextInput value={name} onChange={e => { setName(e.target.value); setDirty(true); }}
+                style={{ width: 210, fontWeight: 700 }} />
+              <TextInput value={description} onChange={e => { setDescription(e.target.value); setDirty(true); }}
+                placeholder="Description (optional)" style={{ flex: 1, minWidth: 160 }} />
+              <span style={{ fontSize: 11.5, color: 'var(--text-muted)', whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums' }}>{fieldCount} field(s) enforced</span>
+              <Button variant="green" size="sm" disabled={!dirty || saving} onClick={save}>{saving ? 'Saving…' : 'Save'}</Button>
+              <Button variant="primary" size="sm" onClick={() => openPicker('apply')}>Apply to devices…</Button>
+              <Button variant="ghost" size="sm" onClick={() => openPicker('compliance')}>Compliance check…</Button>
+              <Button variant="danger" size="sm" onClick={remove}>Delete</Button>
+            </div>
+            <p style={{ fontSize: 12, color: 'var(--text-muted)', margin: '0 0 12px' }}>
               Only filled-in fields are part of the template — they are the settings it applies
               and checks. Leave a field empty to ignore it.
             </p>
@@ -198,51 +208,50 @@ export default function ConfigPage() {
                 setConfig(c => ({ ...c, [mod]: { ...(c[mod] || {}), [key]: value } }));
                 setDirty(true);
               }} />
-          </div>
-        </div>
-      ) : (
-        <div className="flex-1 flex items-center justify-center text-slate-600 text-sm">
-          Select or create a template to edit its settings.
-        </div>
-      )}
+          </Card>
+        ) : (
+          <Card style={{ overflow: 'hidden' }}>
+            <StateBlock variant="empty" title="No template selected"
+              message="Select or create a template to edit its settings." />
+          </Card>
+        )}
+      </div>
 
       {/* Device picker modal */}
       {picker && (
-        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50" onClick={() => setPicker(null)}>
-          <div className="bg-slate-900 border border-slate-700 rounded-xl p-5 w-[30rem] max-h-[70vh] flex flex-col shadow-2xl"
-            onClick={e => e.stopPropagation()}>
-            <h3 className="text-sm font-semibold text-white mb-1">
-              {picker === 'apply' ? 'Apply template to devices' : 'Compliance check'}
-            </h3>
-            <p className="text-xs text-slate-500 mb-3">"{name}" · {fieldCount} setting(s) · devices without a credential are hidden</p>
-            <label className="flex items-center gap-2 px-2 py-1 text-xs text-slate-400">
-              <input type="checkbox" className="accent-brand-500"
-                checked={picked.size === devices.length && devices.length > 0}
-                onChange={() => setPicked(picked.size === devices.length ? new Set() : new Set(devices.map((d: any) => d.id)))} />
-              Select all ({devices.length})
-            </label>
-            <div className="flex-1 overflow-auto border border-slate-800 rounded-lg divide-y divide-slate-800/60">
-              {devices.map((d: any) => (
-                <label key={d.id} className="flex items-center gap-2 px-3 py-2 text-xs text-slate-300 hover:bg-slate-800/50 cursor-pointer">
-                  <input type="checkbox" className="accent-brand-500" checked={picked.has(d.id)}
-                    onChange={() => { const n = new Set(picked); n.has(d.id) ? n.delete(d.id) : n.add(d.id); setPicked(n); }} />
-                  <span className={`w-2 h-2 rounded-full flex-shrink-0 ${d.status === 'online' ? 'bg-emerald-500' : 'bg-red-500'}`} />
-                  <span className="flex-1 truncate">{d.name || d.ip_address}</span>
-                  <span className="text-slate-600 font-mono">{d.ip_address}</span>
-                </label>
-              ))}
-              {devices.length === 0 && <p className="px-3 py-6 text-xs text-slate-600">No devices with a credential assigned.</p>}
-            </div>
-            <div className="flex justify-end gap-2 mt-4">
-              <button onClick={() => setPicker(null)}
-                className="px-3 py-1.5 bg-slate-800 text-slate-300 text-xs rounded-lg hover:bg-slate-700">Cancel</button>
-              <button onClick={runPicker} disabled={picked.size === 0}
-                className="px-4 py-1.5 bg-emerald-600 text-white text-xs rounded-lg hover:bg-emerald-700 disabled:opacity-40">
-                {picker === 'apply' ? `Apply to ${picked.size}` : `Check ${picked.size}`}
-              </button>
-            </div>
+        <Modal onClose={() => setPicker(null)} width={480}>
+          <ModalTitle sub={`"${name}" · ${fieldCount} setting(s) · devices without a credential are hidden`}>
+            {picker === 'apply' ? 'Apply template to devices' : 'Compliance check'}
+          </ModalTitle>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '2px 2px 8px', fontSize: 12, color: 'var(--text-muted)', cursor: 'pointer' }}>
+            <input type="checkbox" style={{ accentColor: 'var(--sr-blue)' }}
+              checked={picked.size === devices.length && devices.length > 0}
+              onChange={() => setPicked(picked.size === devices.length ? new Set() : new Set(devices.map((d: any) => d.id)))} />
+            Select all ({devices.length})
+          </label>
+          <div style={{ maxHeight: 300, overflowY: 'auto', border: '1px solid var(--border)', borderRadius: 11 }}>
+            {devices.map((d: any, i: number) => (
+              <label key={d.id} style={{
+                display: 'flex', alignItems: 'center', gap: 8, padding: '8px 12px', fontSize: 12.5,
+                color: 'var(--text)', cursor: 'pointer',
+                borderTop: i === 0 ? 'none' : '1px solid var(--border)',
+              }}>
+                <input type="checkbox" style={{ accentColor: 'var(--sr-blue)' }} checked={picked.has(d.id)}
+                  onChange={() => { const n = new Set(picked); n.has(d.id) ? n.delete(d.id) : n.add(d.id); setPicked(n); }} />
+                <span style={{ width: 8, height: 8, borderRadius: '50%', flex: 'none', background: d.status === 'online' ? 'var(--sr-exec-m)' : 'var(--sr-pend-m)' }} />
+                <span style={{ flex: 1, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{d.name || d.ip_address}</span>
+                <span style={{ color: 'var(--text-muted)', fontSize: 11.5, fontVariantNumeric: 'tabular-nums' }}>{d.ip_address}</span>
+              </label>
+            ))}
+            {devices.length === 0 && <p style={{ padding: '18px 12px', fontSize: 12, color: 'var(--text-muted)', margin: 0 }}>No devices with a credential assigned.</p>}
           </div>
-        </div>
+          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 16 }}>
+            <Button variant="ghost" size="sm" onClick={() => setPicker(null)}>Cancel</Button>
+            <Button variant="green" size="sm" disabled={picked.size === 0} onClick={runPicker}>
+              {picker === 'apply' ? `Apply to ${picked.size}` : `Check ${picked.size}`}
+            </Button>
+          </div>
+        </Modal>
       )}
     </div>
   );
