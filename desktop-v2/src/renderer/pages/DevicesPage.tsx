@@ -120,7 +120,7 @@ export default function DevicesPage({ onOpenDevice }: { onOpenDevice: (id: strin
   };
 
   const handleBatchRepairFirmware = async () => {
-    if (!(await ipc.confirm(`Reinstall firmware on ${selected.size} device(s) via recovery mode? Devices are processed ONE AT A TIME and each stays offline for several minutes. Settings and users are kept.`))) return;
+    if (!(await ipc.confirm(`Reinstall firmware on ${selected.size} device(s) via recovery mode? Each device downloads the firmware from Control iD (they need INTERNET access). Devices are processed ONE AT A TIME and each stays offline for several minutes. Settings and users are kept.`))) return;
     await ipc.firmwareRepair(Array.from(selected));
     toast('Firmware repair job started — see Tasks page for progress.', 'info');
     setSelected(new Set());

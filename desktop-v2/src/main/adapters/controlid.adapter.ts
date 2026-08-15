@@ -389,12 +389,17 @@ export class ControlIdAdapter implements DeviceAdapter {
   //    into the Web Recovery system, and
   //  - the recovery web server itself (plain HTTP on port 80, page title
   //    "iDFace Max Recovery"), which exposes shell actions via GET:
-  //      /cgi/run_update.sh          reapply the stored firmware, KEEPS config
-  //      /cgi/run_factory_update.sh  reinstall and ERASE all config/users
+  //      /cgi/run_update.sh          ONLINE update: downloads the firmware from
+  //                                  Control iD (https://www.controlid.com.br/
+  //                                  cidrk_max/ACFW/V<ver>/part*.enc), verifies
+  //                                  the signature and reflashes; KEEPS config.
+  //                                  The DEVICE needs internet access.
+  //      /cgi/run_factory_update.sh  same download, but ERASES all config/users
   //      /cgi/reboot_normal.sh       boot back into the normal firmware
   //      /cgi/reboot_recovery.sh     reboot staying in recovery ("hold")
   //      /cgi/read_status.sh         progress text, ends with "FIM:"/"FINISH:"
-  // Verified against a real iDFace Max (see desktop-v2/tools/recovery-control.ps1).
+  // Verified against a real iDFace Max (fw 7.11.3, 15/08/2026): read_status.sh
+  // logged "Starting online update..." + the download of every part*.enc.
 
   /** Whether the recovery web server is answering at this IP (no auth needed).
    *  Recovery always runs plain HTTP on port 80, regardless of the normal

@@ -21,7 +21,7 @@ export default function FirmwarePage() {
   };
 
   const handleRepair = async (d: any) => {
-    if (!(await ipc.confirm(`Reinstall the current firmware on "${d.name}" via recovery mode? Settings and users are KEPT. The device stays offline for several minutes while it reboots into recovery, reapplies its firmware image and boots back.`))) return;
+    if (!(await ipc.confirm(`Reinstall the firmware on "${d.name}" via recovery mode? The device downloads the firmware from Control iD (it needs INTERNET access), reflashes itself and reboots — offline for several minutes. Settings and users are KEPT.`))) return;
     try {
       await ipc.firmwareRepair([d.id]);
       toast('Firmware repair started — follow progress on the Tasks page.', 'info');
@@ -47,10 +47,11 @@ export default function FirmwarePage() {
         background: 'var(--sr-info-bg)', border: '1px solid var(--border)', borderRadius: 11,
         padding: '10px 14px', fontSize: 12, color: 'var(--sr-info-fg)', lineHeight: 1.55,
       }}>
-        <b>Repair</b> reinstalls the firmware image already stored on the device through its recovery
-        mode (settings and users are kept) — use it for corrupted installs or boot loops. Control iD
-        devices download <b>new</b> firmware versions themselves via the update option on the device's
-        About screen / web interface; the API does not accept firmware uploads.
+        <b>Repair</b> reinstalls the firmware through the device's recovery mode: the device
+        <b>downloads the firmware from Control iD's servers</b>, verifies its signature and reflashes
+        itself (settings and users are kept) — use it for corrupted installs or boot loops.
+        <b>The device needs internet access</b> for this. The API does not accept firmware uploads;
+        version upgrades can also be run from the update option on the device's About screen.
       </div>
 
       {/* Summary tiles */}

@@ -120,9 +120,14 @@ pelo próprio equipamento (botão de update na tela About / web UI). O que a API
 - **Web Recovery** (validado em iDFace Max real — ver `desktop-v2/tools/recovery-control.ps1`):
   servidor HTTP puro na **porta 80** (independe de SSL/porta do firmware normal),
   título da página contém "Recovery", **sem autenticação**. Ações via GET:
-  - `/cgi/run_update.sh` — reaplica o firmware armazenado, **MANTÉM config**
-  - `/cgi/run_factory_update.sh` — reinstala e **APAGA toda a config** (device volta
-    admin/admin e possivelmente IP 192.168.0.129)
+  - `/cgi/run_update.sh` — **update ONLINE**: o device baixa o firmware dos servidores
+    da Control iD (`https://www.controlid.com.br/cidrk_max/ACFW/V<ver>/part*.enc` —
+    catalog + partes criptografadas, assinatura validada via `magic.txt.sign`),
+    formata as partições e regrava; **MANTÉM config**. **Exige internet no device**
+    (comprovado ao vivo em fw 7.11.3, 15/08/2026 — o `read_status.sh` loga
+    "Starting online update..." e cada download)
+  - `/cgi/run_factory_update.sh` — mesmo download, mas **APAGA toda a config** (device
+    volta admin/admin e possivelmente IP 192.168.0.129)
   - `/cgi/reboot_normal.sh` — boota no modo normal
   - `/cgi/reboot_recovery.sh` — reboota FICANDO em recovery ("hold", prende device em loop)
   - `/cgi/read_status.sh` — texto de progresso; termina com `FIM:`/`FINISH:` (erro se contiver "error")
