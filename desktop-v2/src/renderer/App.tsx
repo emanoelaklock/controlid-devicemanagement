@@ -5,11 +5,12 @@ import DashboardPage from './pages/DashboardPage';
 import DevicesPage from './pages/DevicesPage';
 import DiscoveryPage from './pages/DiscoveryPage';
 import FirmwarePage from './pages/FirmwarePage';
+import ConfigPage from './pages/ConfigPage';
 import JobsPage from './pages/JobsPage';
 import CredentialsPage from './pages/CredentialsPage';
 import AuditPage from './pages/AuditPage';
 
-export type Page = 'dashboard' | 'devices' | 'discovery' | 'firmware' | 'jobs' | 'credentials' | 'audit';
+export type Page = 'dashboard' | 'devices' | 'discovery' | 'firmware' | 'config' | 'jobs' | 'credentials' | 'audit';
 
 export default function App() {
   const [page, setPage] = useState<Page>('dashboard');
@@ -20,6 +21,7 @@ export default function App() {
       case 'devices': return <DevicesPage />;
       case 'discovery': return <DiscoveryPage />;
       case 'firmware': return <FirmwarePage />;
+      case 'config': return <ConfigPage />;
       case 'jobs': return <JobsPage />;
       case 'credentials': return <CredentialsPage />;
       case 'audit': return <AuditPage />;

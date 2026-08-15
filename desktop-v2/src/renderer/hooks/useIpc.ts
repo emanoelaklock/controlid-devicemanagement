@@ -80,6 +80,17 @@ export const ipc = {
   backupConfig: (deviceId: string) => window.api.invoke('config:backup', deviceId),
   listBackups: (deviceId: string) => window.api.invoke('config:backups', deviceId),
   restoreConfig: (deviceId: string, backupId: string) => window.api.invoke('config:restore', { deviceId, backupId }),
+  getLiveConfig: (deviceId: string) => window.api.invoke('config:get-live', deviceId),
+  applyConfig: (deviceId: string, config: any) => window.api.invoke('config:apply', { deviceId, config }),
+
+  // Config templates
+  listTemplates: () => window.api.invoke('templates:list'),
+  getTemplate: (id: string) => window.api.invoke('templates:get', id),
+  createTemplate: (data: { name: string; description?: string; config?: any }) => window.api.invoke('templates:create', data),
+  updateTemplate: (id: string, data: { name?: string; description?: string; config?: any }) => window.api.invoke('templates:update', { id, ...data }),
+  deleteTemplate: (id: string) => window.api.invoke('templates:delete', id),
+  applyTemplate: (templateId: string, deviceIds: string[]) => window.api.invoke('templates:apply', { templateId, deviceIds }),
+  complianceCheck: (templateId: string, deviceIds: string[]) => window.api.invoke('templates:compliance', { templateId, deviceIds }),
 
   // Firmware
   firmwareSummary: () => window.api.invoke('firmware:summary'),

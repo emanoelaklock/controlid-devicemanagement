@@ -43,8 +43,9 @@ Electron 32 | React 18 | Tailwind CSS (dark) | Vite 5 | sql.js (SQLite WASM) | I
 | Toast notifications (dark) | ✅ |
 | Dialog prompt/confirm via IPC | ✅ |
 | Login do sistema | Sem login (Opção 1) |
-| Templates de configuração (padronização em lote) | ❌ Removido (revisão v2.1 — recurso não homologado) |
-| Compliance check (diff dispositivo × template) | ❌ Removido junto com Templates |
+| Templates de configuração (padronização em lote) | ✅ v2.2 — reintroduzido (a causa da remoção na v2.1, get/set_configuration "quebrados", era a sessão via cookie — corrigida) |
+| Compliance check (diff dispositivo × template) | ✅ v2.2 — job; não conforme = item FAILED com as diferenças |
+| Editor de configuração ao vivo (modal no device) | ✅ v2.2 — catálogo de 26 módulos, aplica só campos alterados |
 | Auto-update via GitHub Releases (electron-updater) | ✅ v2.1 (requer releases publicados) |
 | Network Config remoto (DHCP / IP fixo, modal) | ✅ v2.1 — via set_system_network.fcgi |
 | People management | ❌ Removido (via web) |
@@ -127,6 +128,25 @@ espera o firmware voltar até 5 min e confirma a versão). Handlers: `firmware:r
 (status/enter/exit). UI: Firmware page (botão Repair por device + banner), Devices
 (batch "Repair FW"; painel: Repair Firmware, Enter/Exit Recovery, Factory Reinstall
 com confirmação digitada "ERASE").
+
+## v2.2 — Editor de configuração + Templates + Compliance
+
+Construído sobre `controlid.catalog.ts` (26 módulos; agora bundlado também no renderer):
+
+- **Editor ao vivo** (Devices → painel → "Edit Configuration"): lê a config via
+  `config:get-live` (getConfig módulo a módulo), mostra só módulos/campos que o
+  firmware reportou, destaca alterações em âmbar e envia **apenas os campos
+  alterados** via `config:apply`. Botão "Save as Template" captura o snapshot.
+- **Templates** (página "Configuration"): tabela `config_templates`; campo vazio =
+  não imposto pelo template. CRUD `templates:*`, aplicação em lote via job
+  `batch_config` (`templates:apply`).
+- **Compliance** (`templates:compliance`): job que lê a config ao vivo e compara com
+  os campos impostos; dispositivo não conforme vira item **FAILED** no Tasks com o
+  resumo das diferenças (também vai pro audit log, categoria `config`).
+- Normalização de valores no main (`normValue`): device pode devolver bool/number
+  no JSON; tudo vira string ("1"/"0") — o formato que set_configuration exige.
+- Componente compartilhado `renderer/components/ConfigEditor.tsx` (template +
+  editor ao vivo usam o mesmo).
 
 ## v2.1 — Bugs corrigidos
 

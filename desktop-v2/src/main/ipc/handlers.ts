@@ -611,6 +611,147 @@ export function registerIpcHandlers(getWindow: () => BrowserWindow | null): void
     return ok;
   });
 
+  // ─── Configuration editor & templates ───────────────────────────
+
+  // Normalize a config value for display/compare: the device returns strings,
+  // but JSON parsing can surface booleans/numbers — map everything onto the
+  // string form set_configuration expects ("1"/"0" for booleans).
+  const normValue = (v: unknown): string => {
+    if (v === null || v === undefined) return '';
+    if (v === true) return '1';
+    if (v === false) return '0';
+    return String(v);
+  };
+
+  const normConfig = (raw: any): Record<string, Record<string, string>> => {
+    const out: Record<string, Record<string, string>> = {};
+    for (const [mod, values] of Object.entries(raw ?? {})) {
+      if (!values || typeof values !== 'object') continue;
+      out[mod] = {};
+      for (const [k, v] of Object.entries(values as Record<string, unknown>)) {
+        out[mod][k] = normValue(v);
+      }
+    }
+    return out;
+  };
+
+  // Read the device's live configuration (module-by-module via the catalog).
+  ipcMain.handle('config:get-live', async (_e, deviceId: string) => {
+    const device = queryOne(`SELECT d.*, c.username, c.password as cred_password
+      FROM devices d LEFT JOIN credentials c ON d.credential_id = c.id WHERE d.id = ?`, [deviceId]);
+    if (!device) throw new Error('Device not found');
+    const adapter = adapterRegistry.get(device.manufacturer);
+    if (!adapter) throw new Error('No adapter');
+    const conn: DeviceConnection = { ip: device.ip_address, port: device.port,
+      username: device.username || 'admin', password: device.cred_password ? decrypt(device.cred_password) : '' };
+    return normConfig(await adapter.getConfig(conn));
+  });
+
+  // Apply an edited configuration (the renderer sends only the changed fields).
+  ipcMain.handle('config:apply', async (_e, { deviceId, config }: { deviceId: string; config: Record<string, Record<string, string>> }) => {
+    const device = queryOne(`SELECT d.*, c.username, c.password as cred_password
+      FROM devices d LEFT JOIN credentials c ON d.credential_id = c.id WHERE d.id = ?`, [deviceId]);
+    if (!device) throw new Error('Device not found');
+    const adapter = adapterRegistry.get(device.manufacturer);
+    if (!adapter) throw new Error('No adapter');
+    const fieldCount = Object.values(config).reduce((n, m) => n + Object.keys(m).length, 0);
+    if (fieldCount === 0) return false;
+    const conn: DeviceConnection = { ip: device.ip_address, port: device.port,
+      username: device.username || 'admin', password: device.cred_password ? decrypt(device.cred_password) : '' };
+    const ok = await adapter.setConfig(conn, config);
+    run(`INSERT INTO audit_logs (id, action, category, device_id, device_name, details, severity, created_at) VALUES (?,?,?,?,?,?,?,?)`,
+      [uuid(), 'config_applied', 'config', deviceId, device.name,
+       `${fieldCount} setting(s) changed: ${Object.entries(config).map(([m, v]) => `${m}(${Object.keys(v).join(',')})`).join(' ')}`,
+       'warning', nowLocal()]);
+    if (!ok) throw new Error('Device rejected the configuration (no module was applied)');
+    return true;
+  });
+
+  ipcMain.handle('templates:list', () =>
+    query('SELECT id, name, description, created_at, updated_at FROM config_templates ORDER BY name ASC'));
+
+  ipcMain.handle('templates:get', (_e, id: string) => {
+    const t = queryOne('SELECT * FROM config_templates WHERE id = ?', [id]);
+    if (!t) return null;
+    return { ...t, config: JSON.parse(t.config || '{}') };
+  });
+
+  ipcMain.handle('templates:create', (_e, { name, description, config }: any) => {
+    if (!name) throw new Error('Template name is required');
+    const id = uuid();
+    run(`INSERT INTO config_templates (id, name, description, config) VALUES (?,?,?,?)`,
+      [id, name, description || null, JSON.stringify(config || {})]);
+    return queryOne('SELECT id, name, description, created_at FROM config_templates WHERE id = ?', [id]);
+  });
+
+  ipcMain.handle('templates:update', (_e, { id, name, description, config }: any) => {
+    const existing = queryOne('SELECT * FROM config_templates WHERE id = ?', [id]);
+    if (!existing) throw new Error('Template not found');
+    run(`UPDATE config_templates SET name=?, description=?, config=?, updated_at='${nowLocal()}' WHERE id=?`,
+      [name ?? existing.name, description ?? existing.description,
+       config !== undefined ? JSON.stringify(config) : existing.config, id]);
+    return queryOne('SELECT id, name, description, updated_at FROM config_templates WHERE id = ?', [id]);
+  });
+
+  ipcMain.handle('templates:delete', (_e, id: string) => {
+    run('DELETE FROM config_templates WHERE id = ?', [id]);
+  });
+
+  // Apply a template's enforced fields to many devices (batch job).
+  ipcMain.handle('templates:apply', async (_e, { templateId, deviceIds }: { templateId: string; deviceIds: string[] }) => {
+    const template = queryOne('SELECT * FROM config_templates WHERE id = ?', [templateId]);
+    if (!template) throw new Error('Template not found');
+    const config = JSON.parse(template.config || '{}');
+    const fieldCount = Object.values(config).reduce((n: number, m: any) => n + Object.keys(m || {}).length, 0);
+    if (fieldCount === 0) throw new Error('Template has no fields to apply');
+
+    return jobService.createJob('batch_config', `Apply template "${template.name}" to ${deviceIds.length} device(s)`, deviceIds,
+      async (conn, device) => {
+        const adapter = adapterRegistry.get(device.manufacturer);
+        if (!adapter) throw new Error('No adapter');
+        const ok = await adapter.setConfig(conn, config);
+        if (!ok) throw new Error('Device rejected the configuration (no module was applied)');
+        run(`INSERT INTO audit_logs (id, action, category, device_id, device_name, details, severity, created_at) VALUES (?,?,?,?,?,?,?,?)`,
+          [uuid(), 'template_applied', 'config', device.id, device.name,
+           `Template "${template.name}" applied (${fieldCount} setting(s))`, 'warning', nowLocal()]);
+        return `Template applied (${fieldCount} setting(s))`;
+      }, getWindow());
+  });
+
+  // Compliance check: read each device's live config and diff it against the
+  // template's enforced fields. Non-compliant devices are reported as FAILED
+  // job items so they stand out in the Tasks view, with the differences in the
+  // item message.
+  ipcMain.handle('templates:compliance', async (_e, { templateId, deviceIds }: { templateId: string; deviceIds: string[] }) => {
+    const template = queryOne('SELECT * FROM config_templates WHERE id = ?', [templateId]);
+    if (!template) throw new Error('Template not found');
+    const expected = normConfig(JSON.parse(template.config || '{}'));
+
+    return jobService.createJob('health_check', `Compliance check "${template.name}" on ${deviceIds.length} device(s)`, deviceIds,
+      async (conn, device) => {
+        const adapter = adapterRegistry.get(device.manufacturer);
+        if (!adapter) throw new Error('No adapter');
+        const live = normConfig(await adapter.getConfig(conn));
+        const diffs: string[] = [];
+        for (const [mod, fields] of Object.entries(expected)) {
+          for (const [key, want] of Object.entries(fields)) {
+            if (want === '') continue; // not enforced
+            const got = live[mod]?.[key];
+            if (got === undefined) diffs.push(`${mod}.${key}: not reported (expected "${want}")`);
+            else if (got !== want) diffs.push(`${mod}.${key}: "${got}" (expected "${want}")`);
+          }
+        }
+        if (diffs.length > 0) {
+          const summary = diffs.slice(0, 8).join('; ') + (diffs.length > 8 ? ` …+${diffs.length - 8} more` : '');
+          run(`INSERT INTO audit_logs (id, action, category, device_id, device_name, details, severity, created_at) VALUES (?,?,?,?,?,?,?,?)`,
+            [uuid(), 'compliance_failed', 'config', device.id, device.name,
+             `${diffs.length} difference(s) vs template "${template.name}": ${summary}`, 'warning', nowLocal()]);
+          throw new Error(`${diffs.length} difference(s): ${summary}`);
+        }
+        return 'Compliant';
+      }, getWindow());
+  });
+
   // ─── Firmware Management ────────────────────────────────────────
 
   ipcMain.handle('firmware:summary', () => {

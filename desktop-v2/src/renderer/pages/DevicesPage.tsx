@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { ipc } from '../hooks/useIpc';
 import { fmtDate } from '../utils/date';
 import { toast } from '../components/Toast';
+import ConfigEditor, { ConfigValues, diffValues, stripEmpty } from '../components/ConfigEditor';
 
 const STATUS_COLORS: Record<string, string> = {
   online: 'bg-emerald-500', offline: 'bg-red-500', error: 'bg-amber-500',
@@ -25,6 +26,11 @@ export default function DevicesPage() {
   const [netModal, setNetModal] = useState(false);
   const [netSaving, setNetSaving] = useState(false);
   const [netForm, setNetForm] = useState({ dhcp: false, ip: '', netmask: '255.255.255.0', gateway: '', primary_dns: '', secondary_dns: '' });
+  const [cfgModal, setCfgModal] = useState(false);
+  const [cfgLoading, setCfgLoading] = useState(false);
+  const [cfgSaving, setCfgSaving] = useState(false);
+  const [cfgValues, setCfgValues] = useState<ConfigValues>({});
+  const [cfgOriginal, setCfgOriginal] = useState<ConfigValues>({});
   const detailRef = useRef<any>(null); // keep detail in sync
 
   const load = useCallback(async () => {
@@ -154,6 +160,50 @@ export default function DevicesPage() {
       setTimeout(load, 4000);
     } catch (e: any) { toast(`Network change failed: ${e.message || e}`, 'error'); }
     finally { setNetSaving(false); }
+  };
+
+  const openConfigModal = async () => {
+    if (!detail) return;
+    setCfgModal(true); setCfgLoading(true); setCfgValues({}); setCfgOriginal({});
+    try {
+      const cfg = await ipc.getLiveConfig(detail.id);
+      setCfgValues(cfg);
+      setCfgOriginal(JSON.parse(JSON.stringify(cfg)));
+    } catch (e: any) {
+      toast(`Could not read configuration: ${e.message || e}`, 'error');
+      setCfgModal(false);
+    } finally { setCfgLoading(false); }
+  };
+
+  const applyConfigChanges = async () => {
+    if (!detail) return;
+    // stripEmpty: a field cleared to '' can't be applied (the API has no
+    // "unset" — the adapter skips empty values), so don't count or send it.
+    const diff = stripEmpty(diffValues(cfgOriginal, cfgValues));
+    const n = Object.values(diff).reduce((a, m) => a + Object.keys(m).length, 0);
+    if (n === 0) { toast('No changes to apply.', 'info'); return; }
+    if (!(await ipc.confirm(`Apply ${n} changed setting(s) to this device?`))) return;
+    setCfgSaving(true);
+    try {
+      await ipc.applyConfig(detail.id, diff);
+      toast(`${n} setting(s) applied.`, 'success');
+      setCfgOriginal(JSON.parse(JSON.stringify(cfgValues)));
+    } catch (e: any) { toast(`Apply failed: ${e.message || e}`, 'error'); }
+    finally { setCfgSaving(false); }
+  };
+
+  const saveConfigAsTemplate = async () => {
+    if (!detail) return;
+    const n = await ipc.prompt('Save as Template', 'Template name:', `${detail.name || detail.ip_address} config`);
+    if (!n) return;
+    try {
+      await ipc.createTemplate({
+        name: n,
+        description: `Captured from ${detail.name || detail.ip_address} (${detail.ip_address})`,
+        config: stripEmpty(cfgValues),
+      });
+      toast('Template saved — manage it on the Configuration page.', 'success');
+    } catch (e: any) { toast(`Could not save template: ${e.message || e}`, 'error'); }
   };
 
   const handleAdd = async () => {
@@ -507,6 +557,9 @@ export default function DevicesPage() {
             <button onClick={openNetworkModal} disabled={!detail.credential_id}
               className="w-full px-3 py-2 bg-cyan-700 text-white text-xs rounded-lg hover:bg-cyan-600 disabled:opacity-40 disabled:cursor-not-allowed">
               Network (DHCP / Static IP)</button>
+            <button onClick={openConfigModal} disabled={!detail.credential_id}
+              className="w-full px-3 py-2 bg-teal-700 text-white text-xs rounded-lg hover:bg-teal-600 disabled:opacity-40 disabled:cursor-not-allowed">
+              Edit Configuration</button>
             <button onClick={async () => {
               const country = await ipc.prompt('Finish initial setup',
                 'Country code (the on-screen language is derived from it):', 'BR');
@@ -579,6 +632,52 @@ export default function DevicesPage() {
               className="w-full px-3 py-2 bg-red-900/60 text-red-300 text-xs rounded-lg hover:bg-red-800 disabled:opacity-40 disabled:cursor-not-allowed">Factory Reset</button>
             <button onClick={() => handleDelete(detail.id)}
               className="w-full px-3 py-2 bg-red-700/60 text-red-200 text-xs rounded-lg hover:bg-red-700">Delete Device</button>
+          </div>
+        </div>
+      )}
+
+      {/* Live configuration editor modal */}
+      {cfgModal && detail && (
+        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50"
+          onClick={() => { if (!cfgSaving && !cfgLoading) setCfgModal(false); }}>
+          <div className="bg-slate-900 border border-slate-700 rounded-xl w-[46rem] max-h-[85vh] flex flex-col shadow-2xl"
+            onClick={e => e.stopPropagation()}>
+            <div className="px-5 py-4 border-b border-slate-800 flex items-center justify-between">
+              <div>
+                <h3 className="text-sm font-semibold text-white">Device Configuration</h3>
+                <p className="text-xs text-slate-500">{detail.name || detail.ip_address} · {detail.ip_address}:{detail.port}</p>
+              </div>
+              <button onClick={() => { if (!cfgSaving) setCfgModal(false); }}
+                className="text-slate-500 hover:text-white text-lg">&times;</button>
+            </div>
+            <div className="flex-1 overflow-auto p-4">
+              {cfgLoading ? (
+                <p className="text-center text-slate-500 text-sm py-12">
+                  Reading configuration from the device (module by module)...
+                </p>
+              ) : (
+                <>
+                  <p className="text-xs text-slate-600 mb-3">
+                    Values read live from the device; modules the firmware doesn't support are hidden.
+                    Changed fields are marked in amber and only they are sent on Apply.
+                  </p>
+                  <ConfigEditor values={cfgValues} original={cfgOriginal} emptyHint="—" onlyReported
+                    onChange={(mod, key, value) =>
+                      setCfgValues(c => ({ ...c, [mod]: { ...(c[mod] || {}), [key]: value } }))} />
+                </>
+              )}
+            </div>
+            <div className="px-5 py-3 border-t border-slate-800 flex items-center gap-2">
+              <button onClick={saveConfigAsTemplate} disabled={cfgLoading}
+                className="px-3 py-1.5 bg-slate-700 text-white text-xs rounded-lg hover:bg-slate-600 disabled:opacity-40">
+                Save as Template</button>
+              <div className="flex-1" />
+              <button onClick={() => setCfgModal(false)} disabled={cfgSaving}
+                className="px-3 py-1.5 bg-slate-800 text-slate-300 text-xs rounded-lg hover:bg-slate-700 disabled:opacity-40">Close</button>
+              <button onClick={applyConfigChanges} disabled={cfgLoading || cfgSaving}
+                className="px-4 py-1.5 bg-emerald-600 text-white text-xs rounded-lg hover:bg-emerald-700 disabled:opacity-40">
+                {cfgSaving ? 'Applying...' : 'Apply changes'}</button>
+            </div>
           </div>
         </div>
       )}
