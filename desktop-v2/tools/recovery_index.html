@@ -1,0 +1,133 @@
+﻿<!DOCTYPE html>
+<html>
+<head>              
+<meta charset="utf-8">
+<title>iDFace Max Recovery</title>
+<style>
+body {
+	background-color:black;
+	color:white;
+}
+h1 {
+        color:white;
+        text-align:center;
+}
+div {
+	color:white;
+}
+</style>
+<script>
+
+var tim;
+
+function ajax_go_noupdate(address)
+{
+        var xmlhttp;
+        if (window.XMLHttpRequest)
+        {// code for IE7+, Firefox, Chrome, Opera, Safari
+                xmlhttp=new XMLHttpRequest();
+        }
+        else
+        {// code for IE6, IE5
+                xmlhttp=new ActiveXObject("Microsoft.XMLHTTP");
+        }
+        xmlhttp.onreadystatechange=function()
+        {
+                if (xmlhttp.readyState==4 && xmlhttp.status==200)
+                {
+			tim=setInterval(timer);
+                }
+        }
+        xmlhttp.open("GET",address,true);
+        xmlhttp.send();
+}
+
+function ajax_go(address)
+{
+        var xmlhttp;
+        if (window.XMLHttpRequest)
+        {// code for IE7+, Firefox, Chrome, Opera, Safari
+                xmlhttp=new XMLHttpRequest();
+        }
+        else
+        {// code for IE6, IE5
+                xmlhttp=new ActiveXObject("Microsoft.XMLHTTP");
+        }
+        xmlhttp.onreadystatechange=function()
+        {
+                if (xmlhttp.readyState==4 && xmlhttp.status==200)
+                {
+                        document.getElementById("result").innerHTML='<pre>'+xmlhttp.responseText+'</pre>';
+                }
+        }
+        xmlhttp.open("GET",address,true);
+        xmlhttp.send();
+}
+
+function disable_buttons()
+{
+	var inputs = document.getElementsByTagName("button");
+	for (var i = 0; i < inputs.length; i++)
+	{
+		inputs[i].disabled = true;
+	}
+}
+function timer()
+{
+	clearInterval(tim);
+	ajax_go("cgi/read_status.sh");
+	if (document.getElementById("result").innerHTML.indexOf("FIM:") > -1)
+	{
+		alert("Execution complete! Verify the commands's results and reload the page (F5)");
+	}
+	else
+	{
+		tim = setInterval(timer,1000);
+	}
+}
+function go_update()
+{
+	disable_buttons();
+	ajax_go("cgi/run_update.sh");
+	tim = setInterval(timer,1000);
+}
+function go_factory_update()
+{
+	disable_buttons();
+	ajax_go("cgi/run_factory_update.sh");
+	tim = setInterval(timer,1000);
+}
+function go_reboot()
+{
+	disable_buttons();
+	ajax_go_noupdate("cgi/reboot_normal.sh");
+}
+function go_reboot_recovery()
+{
+	disable_buttons();
+	ajax_go_noupdate("cgi/reboot_recovery.sh");
+}
+</script>                              
+</head>
+<body>
+<img src="logoW.png">
+<h1>Welcome to iDFace Max Web Recovery system</h1>
+Click here to restart the iDFace Max in normal mode:<button id="reiniciar" type="button" onclick="go_reboot();">Restart</button>
+<br/>
+<br/>
+Click here to reboot the iDFace Max in recovery mode:<button id="reiniciar" type="button" onclick="go_reboot_recovery();">Restart</button>
+<br/>
+<br/>
+Click here to start update<button id="atualizar" type="button" onclick="go_update();">Update</button>
+<br/>
+<br/>
+Click here to reset configuration and update<button id="atualizar" type="button" onclick="go_factory_update();">Update</button>
+<br/>
+<br/>
+Commands's results:
+<br/>
+<br/>
+<div id="result"></div>
+</body>
+
+
