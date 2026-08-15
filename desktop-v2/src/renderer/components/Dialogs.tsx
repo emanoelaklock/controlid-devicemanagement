@@ -75,7 +75,10 @@ export function DialogHost() {
         )}
         <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
           <Button variant="ghost" size="sm" onClick={cancel}>Cancel</Button>
-          <Button variant="primary" size="sm" onClick={ok} style={current.kind === 'confirm' ? undefined : undefined}>
+          {/* autoFocus moves focus INSIDE the dialog so Enter confirms and
+              Escape (bubbling to the overlay handler) cancels — and the
+              button that opened the dialog can't be re-triggered by Enter. */}
+          <Button variant="primary" size="sm" onClick={ok} autoFocus={current.kind === 'confirm'}>
             {current.kind === 'confirm' ? 'Confirm' : 'OK'}
           </Button>
         </div>

@@ -137,6 +137,22 @@ export default function DeviceDetailPage({ deviceId, onBack }: { deviceId: strin
     load();
   };
 
+  // The device may be re-addressed outside the app (new subnet, port change);
+  // this edits the local record so the app can reach it again.
+  const handleEditAddress = async () => {
+    const ip = await ipc.prompt('Edit IP address', 'Device IP address:', device.ip_address);
+    if (ip === null) return;
+    if (!/^\d{1,3}(\.\d{1,3}){3}$/.test(ip.trim())) { toast('Invalid IP address.', 'warning'); return; }
+    const portStr = await ipc.prompt('Edit port', 'HTTP port (80, or 443 with HTTPS):', String(device.port));
+    if (portStr === null) return;
+    const port = Number(portStr);
+    if (!Number.isInteger(port) || port < 1 || port > 65535) { toast('Port must be between 1 and 65535.', 'warning'); return; }
+    await ipc.updateDevice(deviceId, { ip_address: ip.trim(), port });
+    toast('Address updated. Run Test connection to confirm the device answers there.', 'success');
+    load();
+    setNetNonce(n => n + 1);
+  };
+
   const handleEditNotes = async () => {
     const notes = await ipc.prompt('Edit notes', 'Notes for this device:', device.notes || '');
     if (notes === null) return;
@@ -397,6 +413,7 @@ export default function DeviceDetailPage({ deviceId, onBack }: { deviceId: strin
               <Button variant="ghost" size="sm" disabled={noCred} onClick={handleLocatePhysical}>Locate (beep + screen)</Button>
               <Button variant="ghost" size="sm" disabled={noCred} onClick={handleSyncTime}>Sync date/time</Button>
               <Button variant="ghost" size="sm" disabled={noCred} onClick={openNetworkModal}>Network (DHCP / static IP)</Button>
+              <Button variant="ghost" size="sm" onClick={handleEditAddress}>Edit IP / port</Button>
               {device.status !== 'online' && device.mac_address && (
                 <Button variant="ghost" size="sm" disabled={testing} onClick={handleLocateByMac}>{testing ? 'Scanning…' : 'Locate by MAC (scan)'}</Button>
               )}

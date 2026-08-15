@@ -51,9 +51,9 @@ const BUTTON_PALETTE: Record<ButtonVariant, CSSProperties> = {
   'warn-outline': { background: 'var(--surface-card)', color: 'var(--sr-warn-fg)', border: '1.5px solid #EBC777' },
 };
 
-export function Button({ variant = 'primary', size = 'md', fullWidth = false, icon = null, disabled = false, title, onClick, children, style }: {
+export function Button({ variant = 'primary', size = 'md', fullWidth = false, icon = null, disabled = false, autoFocus = false, title, onClick, children, style }: {
   variant?: ButtonVariant; size?: 'sm' | 'md' | 'lg'; fullWidth?: boolean; icon?: ReactNode;
-  disabled?: boolean; title?: string; onClick?: (e: React.MouseEvent) => void; children?: ReactNode; style?: CSSProperties;
+  disabled?: boolean; autoFocus?: boolean; title?: string; onClick?: (e: React.MouseEvent) => void; children?: ReactNode; style?: CSSProperties;
 }) {
   const [hover, setHover] = useState(false);
   const pal = BUTTON_PALETTE[variant] || BUTTON_PALETTE.primary;
@@ -66,7 +66,7 @@ export function Button({ variant = 'primary', size = 'md', fullWidth = false, ic
     : {};
   return (
     <button
-      disabled={disabled} title={title} onClick={onClick}
+      disabled={disabled} autoFocus={autoFocus} title={title} onClick={onClick}
       onMouseEnter={() => setHover(true)} onMouseLeave={() => setHover(false)}
       style={{
         display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 8,

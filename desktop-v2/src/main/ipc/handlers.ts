@@ -2,6 +2,7 @@ import { ipcMain, BrowserWindow, shell, dialog } from 'electron';
 import { v4 as uuid } from 'uuid';
 import fs from 'fs';
 import { query, queryOne, run, count, insertAndReturn, nowLocal } from '../db/queries';
+import { getDb, saveDb } from '../db/database';
 import { discoveryService } from '../services/discovery.service';
 import { jobService } from '../services/job.service';
 import { schedulerService } from '../services/scheduler.service';
@@ -56,6 +57,24 @@ export function registerIpcHandlers(getWindow: () => BrowserWindow | null): void
     run('DELETE FROM devices WHERE id = ?', [id]);
     run(`INSERT INTO audit_logs (id, action, category, device_id, severity) VALUES (?,?,'device',?,'info')`,
       [uuid(), 'device_deleted', id]);
+  });
+
+  // Batch delete in a single pass with ONE database save at the end —
+  // run() persists the whole file per statement, which is too heavy per-device.
+  ipcMain.handle('devices:batch-delete', (_e, deviceIds: string[]) => {
+    const db = getDb();
+    let deleted = 0;
+    let failed = 0;
+    for (const id of deviceIds) {
+      try {
+        db.run('DELETE FROM devices WHERE id = ?', [id]);
+        db.run(`INSERT INTO audit_logs (id, action, category, device_id, severity) VALUES (?,?,'device',?,'info')`,
+          [uuid(), 'device_deleted', id]);
+        deleted++;
+      } catch { failed++; }
+    }
+    saveDb();
+    return { deleted, failed };
   });
 
   ipcMain.handle('devices:test-connection', async (_e, id: string) => {
@@ -338,8 +357,8 @@ export function registerIpcHandlers(getWindow: () => BrowserWindow | null): void
       if (r.canceled || !r.filePaths[0]) return { cancelled: true };
       file = r.filePaths[0];
     }
+    if (fs.statSync(file).size > 1024 * 1024) throw new Error('The logo must be 1 MB or smaller');
     const png = fs.readFileSync(file);
-    if (png.length > 1024 * 1024) throw new Error('The logo must be 1 MB or smaller');
     if (!(png[0] === 0x89 && png[1] === 0x50 && png[2] === 0x4e && png[3] === 0x47)) {
       throw new Error('The file is not a PNG image');
     }
@@ -616,7 +635,13 @@ export function registerIpcHandlers(getWindow: () => BrowserWindow | null): void
 
   // ─── Connection health (per-device drops + 7d availability) ─────
 
+  // Three pages poll this every 3-5s plus on every heartbeat event; the
+  // computation scans the whole connection_history synchronously, so cache
+  // the result briefly instead of recomputing per caller.
+  let healthCache: { ts: number; data: Record<string, any> } | null = null;
+
   ipcMain.handle('devices:health', () => {
+    if (healthCache && Date.now() - healthCache.ts < 4000) return healthCache.data;
     // Timestamps in connection_history are local time ("YYYY-MM-DD HH:MM:SS").
     const parseLocal = (s: string): number => {
       const p = s.replace('T', ' ').split(/[- :]/).map(Number);
@@ -689,6 +714,7 @@ export function registerIpcHandlers(getWindow: () => BrowserWindow | null): void
         unstable: d.status === 'online' && drops24 >= 3,
       };
     }
+    healthCache = { ts: Date.now(), data: health };
     return health;
   });
 

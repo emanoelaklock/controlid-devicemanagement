@@ -1,6 +1,6 @@
 import { app, BrowserWindow, Tray, Menu } from 'electron';
 import path from 'path';
-import { initDatabase } from './db/database';
+import { initDatabase, saveDb } from './db/database';
 import { queryOne, run } from './db/queries';
 import { registerIpcHandlers } from './ipc/handlers';
 import { heartbeatService } from './services/heartbeat.service';
@@ -66,10 +66,20 @@ function createWindow(): void {
     mainWindow.loadFile(path.join(__dirname, '..', 'renderer', 'index.html'));
   }
 
+  // Windows session end (logoff/shutdown): don't veto the close — flush the
+  // DB and quit cleanly, or the OS shows "this app is preventing shutdown".
+  mainWindow.on('session-end', () => {
+    isQuitting = true;
+    try { saveDb(); } catch { /* best effort */ }
+    app.quit();
+  });
+
   // Closing the window hides it to the tray so the heartbeat keeps recording
-  // connection history. Quit via the tray menu (or OS shutdown).
+  // connection history. Quit via the tray menu (or OS shutdown). If the tray
+  // icon failed to create, fall through to a normal close — a hidden window
+  // with no tray would leave an unreachable process.
   mainWindow.on('close', (e) => {
-    if (isQuitting) return;
+    if (isQuitting || !tray) return;
     e.preventDefault();
     mainWindow?.hide();
     if (!balloonShown && tray) {
@@ -179,6 +189,7 @@ app.whenReady().then(async () => {
 app.on('before-quit', () => { isQuitting = true; });
 
 // The app lives in the tray — closing the window must NOT end the process,
-// or the heartbeat (and connection history) would stop with it.
-app.on('window-all-closed', () => { if (isQuitting) app.quit(); });
+// or the heartbeat (and connection history) would stop with it. Without a
+// tray icon there is no way back, so quit normally in that case.
+app.on('window-all-closed', () => { if (isQuitting || !tray) app.quit(); });
 app.on('activate', () => { if (!mainWindow) createWindow(); });
