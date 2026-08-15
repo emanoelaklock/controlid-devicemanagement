@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef, ReactNode, CSSProperties } from 'react';
 import { ipc } from '../hooks/useIpc';
 import { fmtDate } from '../utils/date';
 import { toast } from '../components/Toast';
@@ -14,7 +14,140 @@ export function statusInfo(device: any): { label: string; tone: BadgeTone } {
     : { label: 'Offline', tone: 'pend' };
 }
 
-const GRID_COLUMNS = '44px 122px minmax(210px,1.4fr) 148px 105px 138px 96px 172px 60px 118px minmax(160px,1fr) 30px';
+type CellCtx = { h?: DeviceHealth; net?: any };
+
+type ColumnDef = {
+  key: string;
+  label: string;
+  width: string;
+  minPx: number;
+  locked?: boolean; // cannot be hidden (Name is the row's identity/link)
+  // Every column is sortable. Columns whose data doesn't live on the device
+  // row (health, live network) provide sortValue; the rest sort by d[key].
+  sortValue?: (d: any, ctx: CellCtx) => string | number;
+  render: (d: any, ctx: CellCtx) => ReactNode;
+};
+
+// Standard muted text cell; empty values render as an em dash.
+const txt = (v: ReactNode, style?: CSSProperties) => (
+  <div style={{ padding: '10px 12px', color: 'var(--text-muted)', fontSize: 12.5, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', ...style }}>{v || '—'}</div>
+);
+
+// Netmask/gateway/DNS live only on the device (system_information.fcgi), not
+// in the DB: undefined = not fetched yet ('…' while eligible), null = fetch
+// failed, object = live network block.
+function liveNetCell(d: any, net: any, pick: (n: any) => string) {
+  if (net === undefined) return txt(d.status === 'online' && d.credential_id ? '…' : '—');
+  if (net === null) return txt('—');
+  return txt(pick(net), { fontVariantNumeric: 'tabular-nums' });
+}
+
+const COLUMN_GROUPS: { label: string; columns: ColumnDef[] }[] = [
+  {
+    label: 'Device',
+    columns: [
+      {
+        key: 'name', label: 'Name', width: 'minmax(210px,1.4fr)', minPx: 210, locked: true,
+        render: d => <div style={{ padding: '10px 12px', fontWeight: 700, color: 'var(--text)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', letterSpacing: '-.1px' }}>{d.name || d.ip_address}</div>,
+      },
+      { key: 'group_name', label: 'Group', width: '112px', minPx: 112, render: d => txt(d.group_name) },
+      { key: 'tags', label: 'Tags', width: '112px', minPx: 112, render: d => txt(d.tags) },
+      { key: 'notes', label: 'Notes', width: '150px', minPx: 150, render: d => txt(d.notes) },
+      { key: 'created_at', label: 'Added', width: '148px', minPx: 148, render: d => txt(d.created_at ? fmtDate(d.created_at) : '', { fontVariantNumeric: 'tabular-nums' }) },
+      { key: 'updated_at', label: 'Updated', width: '148px', minPx: 148, render: d => txt(d.updated_at ? fmtDate(d.updated_at) : '', { fontVariantNumeric: 'tabular-nums' }) },
+    ],
+  },
+  {
+    label: 'Connection',
+    columns: [
+      {
+        key: 'status', label: 'Status', width: '122px', minPx: 122,
+        render: d => { const st = statusInfo(d); return <div style={{ padding: '10px 12px' }}><Badge tone={st.tone} dot>{st.label}</Badge></div>; },
+      },
+      {
+        key: 'uptime', label: 'Uptime 7d', width: '118px', minPx: 118,
+        sortValue: (_d, { h }) => (h ? h.availability_7d : -1),
+        render: (_d, { h }) => (
+          <div style={{ padding: '10px 12px' }}>
+            {h ? <UptimeBar value={h.availability_7d} /> : <span style={{ color: 'var(--text-muted)', fontSize: 12 }}>—</span>}
+          </div>
+        ),
+      },
+      { key: 'drops_24h', label: 'Drops 24h', width: '84px', minPx: 84, sortValue: (_d, { h }) => (h ? h.drops_24h : -1), render: (_d, { h }) => txt(h ? String(h.drops_24h) : '', { fontVariantNumeric: 'tabular-nums' }) },
+      { key: 'drops_7d', label: 'Drops 7d', width: '78px', minPx: 78, sortValue: (_d, { h }) => (h ? h.drops_7d : -1), render: (_d, { h }) => txt(h ? String(h.drops_7d) : '', { fontVariantNumeric: 'tabular-nums' }) },
+      {
+        key: 'last_heartbeat', label: 'Last heartbeat', width: 'minmax(160px,1fr)', minPx: 160,
+        render: d => txt(d.last_heartbeat ? fmtDate(d.last_heartbeat) : 'Never', { fontVariantNumeric: 'tabular-nums' }),
+      },
+      { key: 'last_seen', label: 'Last seen', width: '148px', minPx: 148, render: d => txt(d.last_seen ? fmtDate(d.last_seen) : 'Never', { fontVariantNumeric: 'tabular-nums' }) },
+    ],
+  },
+  {
+    label: 'Network',
+    columns: [
+      {
+        key: 'ip_address', label: 'IP address', width: '148px', minPx: 148,
+        render: d => (
+          <div style={{ padding: '10px 12px', fontVariantNumeric: 'tabular-nums', fontSize: 12.5, whiteSpace: 'nowrap' }}>
+            <a href="#" onClick={e => { e.preventDefault(); e.stopPropagation(); window.api.invoke('shell:open-url', `http${d.https_enabled ? 's' : ''}://${d.ip_address}:${d.port}`); }}>
+              {d.ip_address}:{d.port}
+            </a>
+          </div>
+        ),
+      },
+      { key: 'mac_address', label: 'MAC address', width: '172px', minPx: 172, render: d => txt(d.mac_address, { fontSize: 12, fontVariantNumeric: 'tabular-nums' }) },
+      { key: 'dhcp_enabled', label: 'DHCP', width: '60px', minPx: 60, render: d => txt(d.dhcp_enabled ? 'Yes' : 'No') },
+      { key: 'hostname', label: 'Hostname', width: '130px', minPx: 130, render: d => txt(d.hostname) },
+      { key: 'https_enabled', label: 'HTTPS', width: '64px', minPx: 64, render: d => txt(d.https_enabled ? 'On' : 'Off') },
+      { key: 'netmask', label: 'Netmask', width: '118px', minPx: 118, sortValue: (_d, { net }) => net?.netmask || '', render: (d, { net }) => liveNetCell(d, net, n => n.netmask) },
+      { key: 'gateway', label: 'Gateway', width: '118px', minPx: 118, sortValue: (_d, { net }) => net?.gateway || '', render: (d, { net }) => liveNetCell(d, net, n => n.gateway) },
+      {
+        key: 'dns', label: 'DNS', width: '190px', minPx: 190,
+        sortValue: (_d, { net }) => net?.primary_dns || net?.dns_primary || '',
+        render: (d, { net }) => liveNetCell(d, net, n => {
+          const dns1 = n.primary_dns || n.dns_primary || '';
+          const dns2 = n.secondary_dns || n.dns_secondary || '';
+          return dns1 + (dns2 ? ` · ${dns2}` : '');
+        }),
+      },
+    ],
+  },
+  {
+    label: 'Equipment',
+    columns: [
+      { key: 'model', label: 'Model', width: '105px', minPx: 105, render: d => txt(d.model) },
+      { key: 'serial_number', label: 'Serial', width: '138px', minPx: 138, render: d => txt(d.serial_number, { fontSize: 12, fontVariantNumeric: 'tabular-nums' }) },
+      { key: 'firmware_version', label: 'Firmware', width: '96px', minPx: 96, render: d => txt(d.firmware_version, { fontVariantNumeric: 'tabular-nums' }) },
+      { key: 'manufacturer', label: 'Manufacturer', width: '104px', minPx: 104, render: d => txt(d.manufacturer === 'controlid' ? 'Control iD' : d.manufacturer) },
+      { key: 'credential_name', label: 'Credential', width: '120px', minPx: 120, render: d => txt(d.credential_name) },
+    ],
+  },
+];
+
+const COLUMNS: ColumnDef[] = COLUMN_GROUPS.flatMap(g => g.columns);
+
+// Same set the list showed before the picker existed — new columns are opt-in.
+const DEFAULT_VISIBLE = [
+  'name', 'status', 'uptime', 'last_heartbeat', 'ip_address', 'mac_address',
+  'dhcp_enabled', 'model', 'serial_number', 'firmware_version',
+];
+
+// Columns whose data must be fetched live from each device.
+const LIVE_NET_KEYS = ['netmask', 'gateway', 'dns'];
+
+const COLS_STORAGE_KEY = 'devices.visibleColumns';
+
+function loadVisibleColumns(): Set<string> {
+  try {
+    const saved = JSON.parse(localStorage.getItem(COLS_STORAGE_KEY) || '');
+    if (Array.isArray(saved)) {
+      const valid = saved.filter(k => COLUMNS.some(c => c.key === k));
+      COLUMNS.filter(c => c.locked).forEach(c => { if (!valid.includes(c.key)) valid.push(c.key); });
+      return new Set(valid);
+    }
+  } catch { /* first run or corrupted value — fall through to default */ }
+  return new Set(DEFAULT_VISIBLE);
+}
 
 export default function DevicesPage({ onOpenDevice }: { onOpenDevice: (id: string) => void }) {
   const [devices, setDevices] = useState<any[]>([]);
@@ -31,6 +164,66 @@ export default function DevicesPage({ onOpenDevice }: { onOpenDevice: (id: strin
   const [hardenForm, setHardenForm] = useState<{ https: 'enable' | 'disable' | 'keep'; ssh: 'enable' | 'disable' | 'keep' }>({ https: 'keep', ssh: 'disable' });
   const [sortCol, setSortCol] = useState<string>('name');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
+  const [visibleCols, setVisibleCols] = useState<Set<string>>(loadVisibleColumns);
+  const [colsMenu, setColsMenu] = useState(false);
+  const colsMenuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!colsMenu) return;
+    const onDown = (e: MouseEvent) => {
+      if (colsMenuRef.current && !colsMenuRef.current.contains(e.target as Node)) setColsMenu(false);
+    };
+    document.addEventListener('mousedown', onDown);
+    return () => document.removeEventListener('mousedown', onDown);
+  }, [colsMenu]);
+
+  const persistCols = (next: Set<string>) => {
+    localStorage.setItem(COLS_STORAGE_KEY, JSON.stringify(Array.from(next)));
+    return next;
+  };
+
+  const toggleColumn = (key: string) => {
+    setVisibleCols(prev => {
+      const next = new Set(prev);
+      next.has(key) ? next.delete(key) : next.add(key);
+      return persistCols(next);
+    });
+  };
+
+  const toggleGroup = (g: { columns: ColumnDef[] }) => {
+    setVisibleCols(prev => {
+      const next = new Set(prev);
+      const toggleable = g.columns.filter(c => !c.locked);
+      const allOn = toggleable.every(c => next.has(c.key));
+      toggleable.forEach(c => { allOn ? next.delete(c.key) : next.add(c.key); });
+      return persistCols(next);
+    });
+  };
+
+  const shownColumns = COLUMNS.filter(c => visibleCols.has(c.key));
+  const gridColumns = `44px ${shownColumns.map(c => c.width).join(' ')} 30px`;
+  const tableMinWidth = 44 + shownColumns.reduce((s, c) => s + c.minPx, 0) + 30;
+
+  // ─── Live network info (netmask/gateway/DNS) ──────────────────────
+  // Only fetched while one of those columns is visible; each device is
+  // queried once (login + system_information + logout is a full HTTP round
+  // trip), at most 5 new devices per poll tick so the LAN isn't hammered.
+  const [liveNet, setLiveNet] = useState<Record<string, any>>({});
+  const liveNetRequested = useRef<Set<string>>(new Set());
+  const needLiveNet = LIVE_NET_KEYS.some(k => visibleCols.has(k));
+
+  useEffect(() => {
+    if (!needLiveNet) return;
+    devices
+      .filter(d => d.status === 'online' && d.credential_id && !liveNetRequested.current.has(d.id))
+      .slice(0, 5)
+      .forEach(d => {
+        liveNetRequested.current.add(d.id);
+        ipc.getNetwork(d.id)
+          .then((net: any) => setLiveNet(prev => ({ ...prev, [d.id]: net || {} })))
+          .catch(() => setLiveNet(prev => ({ ...prev, [d.id]: null })));
+      });
+  }, [needLiveNet, devices]);
 
   const load = useCallback(() => {
     ipc.listDevices().then(setDevices).catch(() => {});
@@ -69,9 +262,13 @@ export default function DevicesPage({ onOpenDevice }: { onOpenDevice: (id: strin
         || d.model?.toLowerCase().includes(q) || d.firmware_version?.includes(search);
     })
     .sort((a, b) => {
-      const va = (a[sortCol] ?? '') as string;
-      const vb = (b[sortCol] ?? '') as string;
-      const cmp = String(va).localeCompare(String(vb), undefined, { numeric: true });
+      const col = COLUMNS.find(c => c.key === sortCol);
+      const val = (d: any) => (col?.sortValue ? col.sortValue(d, { h: health[d.id], net: liveNet[d.id] }) : d[sortCol]);
+      const va = val(a);
+      const vb = val(b);
+      const cmp = typeof va === 'number' && typeof vb === 'number'
+        ? va - vb
+        : String(va ?? '').localeCompare(String(vb ?? ''), undefined, { numeric: true });
       return sortDir === 'asc' ? cmp : -cmp;
     });
 
@@ -176,6 +373,8 @@ export default function DevicesPage({ onOpenDevice }: { onOpenDevice: (id: strin
   };
 
   const handleRefresh = async () => {
+    liveNetRequested.current.clear();
+    setLiveNet({});
     const allIds = devices.filter(d => d.credential_id).map((d: any) => d.id);
     if (allIds.length === 0) { toast('No devices with credentials to refresh.', 'warning'); return; }
     await ipc.batchTestConnection(allIds);
@@ -239,7 +438,50 @@ export default function DevicesPage({ onOpenDevice }: { onOpenDevice: (id: strin
         <div style={{ flex: 1 }} />
         <TextInput placeholder="Search name, IP, MAC…" value={search} onChange={e => setSearch(e.target.value)} style={{ width: 230 }} />
         <Button variant="ghost" size="sm" onClick={handleRefresh}>↻ Refresh</Button>
-        <Button variant="ghost" size="sm" onClick={() => ipc.exportDevicesCsv()}>Export (CSV)</Button>
+        <div ref={colsMenuRef} style={{ position: 'relative' }}>
+          <Button variant="ghost" size="sm" onClick={() => setColsMenu(v => !v)}>Columns ▾</Button>
+          {colsMenu && (
+            <div style={{
+              position: 'absolute', top: 'calc(100% + 6px)', right: 0, zIndex: 40,
+              background: 'var(--surface-card)', border: '1px solid var(--border-strong)', borderRadius: 11,
+              boxShadow: '0 8px 24px rgba(0,0,0,.14)', padding: '10px 14px 12px',
+              display: 'flex', gap: 20, maxHeight: '70vh', overflow: 'auto',
+            }}>
+              {COLUMN_GROUPS.map(g => {
+                const toggleable = g.columns.filter(c => !c.locked);
+                const allOn = toggleable.every(c => visibleCols.has(c.key));
+                const someOn = toggleable.some(c => visibleCols.has(c.key));
+                return (
+                  <div key={g.label} style={{ minWidth: 124 }}>
+                    <label style={{
+                      display: 'flex', alignItems: 'center', gap: 8, padding: '4px 0 6px',
+                      fontSize: 10.5, fontWeight: 800, letterSpacing: '.07em', textTransform: 'uppercase',
+                      color: 'var(--text-muted)', cursor: 'pointer', whiteSpace: 'nowrap', userSelect: 'none',
+                      borderBottom: '1px solid var(--border)', marginBottom: 4,
+                    }}>
+                      <input type="checkbox" checked={allOn}
+                        ref={el => { if (el) el.indeterminate = !allOn && someOn; }}
+                        onChange={() => toggleGroup(g)} style={{ accentColor: 'var(--sr-blue)' }} />
+                      {g.label}
+                    </label>
+                    {g.columns.map(c => (
+                      <label key={c.key} style={{
+                        display: 'flex', alignItems: 'center', gap: 8, padding: '5px 0', fontSize: 12.5,
+                        color: c.locked ? 'var(--text-muted)' : 'var(--text)',
+                        cursor: c.locked ? 'default' : 'pointer', whiteSpace: 'nowrap', userSelect: 'none',
+                      }}>
+                        <input type="checkbox" checked={visibleCols.has(c.key)} disabled={c.locked}
+                          onChange={() => toggleColumn(c.key)} style={{ accentColor: 'var(--sr-blue)' }} />
+                        {c.label}
+                      </label>
+                    ))}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+        <Button variant="ghost" size="sm" onClick={() => ipc.exportDevicesCsv(liveNet)}>Export (CSV)</Button>
         <Button variant="primary" size="sm" onClick={() => setAddModal(true)}>+ Add device</Button>
       </div>
 
@@ -268,54 +510,29 @@ export default function DevicesPage({ onOpenDevice }: { onOpenDevice: (id: strin
       {/* Devices table */}
       <Card style={{ overflow: 'hidden' }}>
         <div style={{ overflowX: 'auto' }}>
-          <div style={{ minWidth: 1380 }}>
+          <div style={{ minWidth: tableMinWidth }}>
             <div style={{
-              display: 'grid', gridTemplateColumns: GRID_COLUMNS, alignItems: 'center',
+              display: 'grid', gridTemplateColumns: gridColumns, alignItems: 'center',
               background: 'var(--surface-sunken)', borderBottom: '1px solid var(--border)',
             }}>
               <div style={{ padding: '10px 0 10px 16px' }}>
                 <input type="checkbox" checked={filtered.length > 0 && filtered.every(d => selected.has(d.id))} onChange={selectAll} style={{ accentColor: 'var(--sr-blue)' }} />
               </div>
-              <div className="sr-th" style={{ cursor: 'pointer' }} onClick={() => toggleSort('status')}>Status{sortIcon('status')}</div>
-              <div className="sr-th" style={{ cursor: 'pointer' }} onClick={() => toggleSort('name')}>Name{sortIcon('name')}</div>
-              <div className="sr-th" style={{ cursor: 'pointer' }} onClick={() => toggleSort('ip_address')}>IP address{sortIcon('ip_address')}</div>
-              <div className="sr-th" style={{ cursor: 'pointer' }} onClick={() => toggleSort('model')}>Model{sortIcon('model')}</div>
-              <div className="sr-th" style={{ cursor: 'pointer' }} onClick={() => toggleSort('serial_number')}>Serial{sortIcon('serial_number')}</div>
-              <div className="sr-th" style={{ cursor: 'pointer' }} onClick={() => toggleSort('firmware_version')}>Firmware{sortIcon('firmware_version')}</div>
-              <div className="sr-th" style={{ cursor: 'pointer' }} onClick={() => toggleSort('mac_address')}>MAC address{sortIcon('mac_address')}</div>
-              <div className="sr-th" style={{ cursor: 'pointer' }} onClick={() => toggleSort('dhcp_enabled')}>DHCP{sortIcon('dhcp_enabled')}</div>
-              <div className="sr-th">Uptime 7d</div>
-              <div className="sr-th" style={{ cursor: 'pointer' }} onClick={() => toggleSort('last_heartbeat')}>Last heartbeat{sortIcon('last_heartbeat')}</div>
+              {shownColumns.map(c => (
+                <div key={c.key} className="sr-th" style={{ cursor: 'pointer' }} onClick={() => toggleSort(c.key)}>{c.label}{sortIcon(c.key)}</div>
+              ))}
               <div />
             </div>
 
             {filtered.map(d => {
-              const h = health[d.id];
-              const st = statusInfo(d);
+              const ctx: CellCtx = { h: health[d.id], net: liveNet[d.id] };
               return (
                 <div key={d.id} className="sr-row" onClick={() => onOpenDevice(d.id)}
-                  style={{ display: 'grid', gridTemplateColumns: GRID_COLUMNS, alignItems: 'center' }}>
+                  style={{ display: 'grid', gridTemplateColumns: gridColumns, alignItems: 'center' }}>
                   <div style={{ padding: '10px 0 10px 16px' }} onClick={e => e.stopPropagation()}>
                     <input type="checkbox" checked={selected.has(d.id)} onChange={() => toggleSelect(d.id)} style={{ accentColor: 'var(--sr-blue)' }} />
                   </div>
-                  <div style={{ padding: '10px 12px' }}><Badge tone={st.tone} dot>{st.label}</Badge></div>
-                  <div style={{ padding: '10px 12px', fontWeight: 700, color: 'var(--text)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', letterSpacing: '-.1px' }}>{d.name || d.ip_address}</div>
-                  <div style={{ padding: '10px 12px', fontVariantNumeric: 'tabular-nums', fontSize: 12.5, whiteSpace: 'nowrap' }}>
-                    <a href="#" onClick={e => { e.preventDefault(); e.stopPropagation(); window.api.invoke('shell:open-url', `http${d.https_enabled ? 's' : ''}://${d.ip_address}:${d.port}`); }}>
-                      {d.ip_address}:{d.port}
-                    </a>
-                  </div>
-                  <div style={{ padding: '10px 12px', color: 'var(--text-muted)', whiteSpace: 'nowrap', fontSize: 12.5 }}>{d.model || '—'}</div>
-                  <div style={{ padding: '10px 12px', color: 'var(--text-muted)', fontSize: 12, fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}>{d.serial_number || '—'}</div>
-                  <div style={{ padding: '10px 12px', color: 'var(--text-muted)', fontSize: 12.5, fontVariantNumeric: 'tabular-nums' }}>{d.firmware_version || '—'}</div>
-                  <div style={{ padding: '10px 12px', color: 'var(--text-muted)', fontSize: 12, fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}>{d.mac_address || '—'}</div>
-                  <div style={{ padding: '10px 12px', color: 'var(--text-muted)', fontSize: 12.5 }}>{d.dhcp_enabled ? 'Yes' : 'No'}</div>
-                  <div style={{ padding: '10px 12px' }}>
-                    {h ? <UptimeBar value={h.availability_7d} /> : <span style={{ color: 'var(--text-muted)', fontSize: 12 }}>—</span>}
-                  </div>
-                  <div style={{ padding: '10px 12px', color: 'var(--text-muted)', fontSize: 12.5, fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}>
-                    {d.last_heartbeat ? fmtDate(d.last_heartbeat) : 'Never'}
-                  </div>
+                  {shownColumns.map(c => <div key={c.key} style={{ minWidth: 0 }}>{c.render(d, ctx)}</div>)}
                   <div style={{ color: 'var(--text-muted)', fontSize: 15 }}>›</div>
                 </div>
               );

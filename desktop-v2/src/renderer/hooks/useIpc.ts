@@ -117,7 +117,7 @@ export const ipc = {
   deviceRecovery: (id: string, action: 'status' | 'enter' | 'exit') => window.api.invoke('devices:recovery', { id, action }),
 
   // Export
-  exportDevicesCsv: () => window.api.invoke('export:devices-csv'),
+  exportDevicesCsv: (liveNet?: Record<string, any>) => window.api.invoke('export:devices-csv', liveNet),
   exportAuditCsv: () => window.api.invoke('export:audit-csv'),
 
   // Dialogs — in-app themed modals (see components/Dialogs.tsx). The native
