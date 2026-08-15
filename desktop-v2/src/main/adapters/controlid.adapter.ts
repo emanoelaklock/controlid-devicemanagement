@@ -268,8 +268,18 @@ export class ControlIdAdapter implements DeviceAdapter {
       ...changes,
     };
 
-    const res = await this.httpRequest(proto, conn.ip, conn.port, '/set_system_network.fcgi',
-      JSON.stringify(payload), 10000, session);
+    let res: any;
+    try {
+      res = await this.httpRequest(proto, conn.ip, conn.port, '/set_system_network.fcgi',
+        JSON.stringify(payload), 10000, session);
+    } catch (e: any) {
+      // The device applies network settings the moment it receives them and
+      // resets its network stack, frequently dropping the socket before the
+      // HTTP response goes out. A connection cut on THIS request (login and
+      // the config read above already succeeded) means the change was applied.
+      if (/socket hang up|ECONNRESET|EPIPE|ECONNABORTED/i.test(String(e?.message || e))) return true;
+      throw e;
+    }
     if (res?.error) throw new Error(typeof res.error === 'string' ? res.error : JSON.stringify(res.error));
     // Don't logout: the device may already be re-applying network settings
     return true;
