@@ -18,6 +18,8 @@ export const ipc = {
   createDevice: (data: any) => window.api.invoke('devices:create', data),
   updateDevice: (id: string, data: any) => window.api.invoke('devices:update', { id, data }),
   deleteDevice: (id: string) => window.api.invoke('devices:delete', id),
+  batchDeleteDevices: (ids: string[]): Promise<{ deleted: number; failed: number }> =>
+    window.api.invoke('devices:batch-delete', ids),
   testConnection: (id: string) => window.api.invoke('devices:test-connection', id),
   locateDevice: (id: string) => window.api.invoke('devices:locate', id),
   locatePhysical: (id: string, opts: { buzz?: boolean; message?: string }) => window.api.invoke('devices:locate-physical', { id, ...opts }),

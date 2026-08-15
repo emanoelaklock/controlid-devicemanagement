@@ -227,25 +227,37 @@ function createSchema(): void {
   try {
     const info = _db.exec(`PRAGMA table_info(config_templates)`);
     const cols = info[0] ? info[0].values.map((v: any[]) => String(v[1])) : [];
-    if (cols.length > 0 && !cols.includes('description')) {
+    // A leftover config_templates_old means a previous migration attempt was
+    // interrupted — resume it, or the old rows would be stranded forever.
+    const leftover = _db.exec(`SELECT name FROM sqlite_master WHERE type='table' AND name='config_templates_old'`);
+    const hasLeftover = !!(leftover[0] && leftover[0].values.length);
+    if ((cols.length > 0 && !cols.includes('description')) || hasLeftover) {
       console.log('[DB] Migrating config_templates to the v2.2 shape');
-      _db.run(`ALTER TABLE config_templates RENAME TO config_templates_old`);
-      _db.run(`
-        CREATE TABLE config_templates (
-          id TEXT PRIMARY KEY NOT NULL,
-          name TEXT NOT NULL,
-          description TEXT,
-          config TEXT NOT NULL DEFAULT '{}',
-          created_at TEXT NOT NULL DEFAULT (datetime('now','localtime')),
-          updated_at TEXT NOT NULL DEFAULT (datetime('now','localtime'))
-        )
-      `);
-      _db.run(`INSERT INTO config_templates (id, name, config, created_at, updated_at)
-        SELECT id, name, config, created_at, updated_at FROM config_templates_old`);
-      _db.run(`DROP TABLE config_templates_old`);
+      _db.run('BEGIN');
+      try {
+        if (hasLeftover) _db.run(`DROP TABLE IF EXISTS config_templates`);
+        else _db.run(`ALTER TABLE config_templates RENAME TO config_templates_old`);
+        _db.run(`
+          CREATE TABLE config_templates (
+            id TEXT PRIMARY KEY NOT NULL,
+            name TEXT NOT NULL,
+            description TEXT,
+            config TEXT NOT NULL DEFAULT '{}',
+            created_at TEXT NOT NULL DEFAULT (datetime('now','localtime')),
+            updated_at TEXT NOT NULL DEFAULT (datetime('now','localtime'))
+          )
+        `);
+        _db.run(`INSERT INTO config_templates (id, name, config, created_at, updated_at)
+          SELECT id, name, config, created_at, updated_at FROM config_templates_old`);
+        _db.run(`DROP TABLE config_templates_old`);
+        _db.run('COMMIT');
+      } catch (err) {
+        _db.run('ROLLBACK');
+        throw err;
+      }
     }
   } catch (err) {
-    console.warn('[DB] config_templates migration failed:', err);
+    console.error('[DB] config_templates migration failed (templates may be unavailable):', err);
   }
 
   _db.run(`CREATE INDEX IF NOT EXISTS idx_devices_status ON devices(status)`);

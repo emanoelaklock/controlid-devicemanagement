@@ -45,6 +45,10 @@ export default function DevicesPage({ onOpenDevice }: { onOpenDevice: (id: strin
     return () => { clearInterval(interval); unsub?.(); };
   }, [load]);
 
+  // Batch actions must never target rows the operator can't see: switching
+  // the group filter or the search clears the selection.
+  useEffect(() => { setSelected(new Set()); }, [filterGroup, search]);
+
   const toggleSort = (col: string) => {
     if (sortCol === col) setSortDir(d => (d === 'asc' ? 'desc' : 'asc'));
     else { setSortCol(col); setSortDir('asc'); }
@@ -78,7 +82,7 @@ export default function DevicesPage({ onOpenDevice }: { onOpenDevice: (id: strin
   };
 
   const selectAll = () => {
-    if (selected.size === filtered.length && filtered.length > 0) setSelected(new Set());
+    if (filtered.length > 0 && filtered.every(d => selected.has(d.id))) setSelected(new Set());
     else setSelected(new Set(filtered.map(d => d.id)));
   };
 
@@ -162,10 +166,11 @@ export default function DevicesPage({ onOpenDevice }: { onOpenDevice: (id: strin
   const handleBatchDelete = async () => {
     const n = selected.size;
     if (!(await ipc.confirm(`Delete ${n} device(s)? Their connection history and config backups are removed too. They can be re-added later via Discovery.`))) return;
-    for (const id of Array.from(selected)) {
-      try { await ipc.deleteDevice(id); } catch (e: any) { toast(`Delete failed: ${e.message || e}`, 'error'); }
-    }
-    toast(`${n} device(s) deleted.`, 'success');
+    try {
+      const r = await ipc.batchDeleteDevices(Array.from(selected));
+      if (r.failed > 0) toast(`${r.deleted} deleted, ${r.failed} failed.`, 'warning');
+      else toast(`${r.deleted} device(s) deleted.`, 'success');
+    } catch (e: any) { toast(`Delete failed: ${e.message || e}`, 'error'); }
     setSelected(new Set());
     load();
   };
@@ -180,7 +185,12 @@ export default function DevicesPage({ onOpenDevice }: { onOpenDevice: (id: strin
 
   const handleAdd = async () => {
     if (!addForm.ip_address) { toast('IP address is required.', 'warning'); return; }
-    await ipc.createDevice({ ...addForm, name: addForm.name || addForm.ip_address });
+    const port = Number(addForm.port);
+    if (!Number.isInteger(port) || port < 1 || port > 65535) {
+      toast('Port must be between 1 and 65535 (default 80).', 'warning');
+      return;
+    }
+    await ipc.createDevice({ ...addForm, port, name: addForm.name || addForm.ip_address });
     setAddModal(false);
     setAddForm({ name: '', ip_address: '', port: 80, manufacturer: 'controlid', model: '' });
     load();
@@ -264,7 +274,7 @@ export default function DevicesPage({ onOpenDevice }: { onOpenDevice: (id: strin
               background: 'var(--surface-sunken)', borderBottom: '1px solid var(--border)',
             }}>
               <div style={{ padding: '10px 0 10px 16px' }}>
-                <input type="checkbox" checked={selected.size > 0 && selected.size === filtered.length} onChange={selectAll} style={{ accentColor: 'var(--sr-blue)' }} />
+                <input type="checkbox" checked={filtered.length > 0 && filtered.every(d => selected.has(d.id))} onChange={selectAll} style={{ accentColor: 'var(--sr-blue)' }} />
               </div>
               <div className="sr-th" style={{ cursor: 'pointer' }} onClick={() => toggleSort('status')}>Status{sortIcon('status')}</div>
               <div className="sr-th" style={{ cursor: 'pointer' }} onClick={() => toggleSort('name')}>Name{sortIcon('name')}</div>
