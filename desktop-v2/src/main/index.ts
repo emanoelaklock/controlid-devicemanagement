@@ -21,8 +21,9 @@ const startHidden = process.argv.includes('--hidden');
 
 // A hidden autostarted instance + a desktop-shortcut launch must not run two
 // copies (two processes writing the same SQLite file). The second launch just
-// pops the existing window.
-const gotLock = app.requestSingleInstanceLock();
+// pops the existing window. Dev skips the lock: it shares the userData name
+// with the installed app, and the two must not block each other.
+const gotLock = app.isPackaged ? app.requestSingleInstanceLock() : true;
 if (!gotLock) {
   app.quit();
 } else {
