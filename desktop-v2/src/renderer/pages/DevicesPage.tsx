@@ -636,6 +636,15 @@ export default function DevicesPage() {
             )}
             <button onClick={() => ipc.openDoor(detail.id)} disabled={!detail.credential_id}
               className="w-full px-3 py-2 bg-emerald-600 text-white text-xs rounded-lg hover:bg-emerald-700 disabled:opacity-40 disabled:cursor-not-allowed">Open Door</button>
+            <button onClick={async () => {
+              try {
+                toast('Beeping and showing a message on the device...', 'info');
+                await ipc.locatePhysical(detail.id, { buzz: true, message: 'Localizando este equipamento' });
+                toast('Device signalled (buzzer + screen).', 'success');
+              } catch (e: any) { toast(`Locate failed: ${e.message || e}`, 'error'); }
+            }} disabled={!detail.credential_id}
+              className="w-full px-3 py-2 bg-fuchsia-700 text-white text-xs rounded-lg hover:bg-fuchsia-600 disabled:opacity-40 disabled:cursor-not-allowed">
+              Locate (beep + screen)</button>
             <button onClick={async () => { if (await ipc.confirm('Reboot this device?')) ipc.rebootDevice(detail.id); }} disabled={!detail.credential_id}
               className="w-full px-3 py-2 bg-amber-600 text-white text-xs rounded-lg hover:bg-amber-700 disabled:opacity-40 disabled:cursor-not-allowed">Reboot</button>
             <button onClick={async () => {

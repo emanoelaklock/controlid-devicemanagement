@@ -51,6 +51,7 @@ Electron 32 | React 18 | Tailwind CSS (dark) | Vite 5 | sql.js (SQLite WASM) | I
 | NTP em lote (habilitar/desabilitar + fuso) | ✅ v2.2 — módulo ntp só tem enabled/timezone; NÃO há campo de servidor NTP na API |
 | Hardening em lote (HTTPS self-signed + SSH) | ✅ v2.2 — batch:harden |
 | Auditoria de senha de fábrica + alerta no Dashboard | ✅ v2.2 — security:audit, coluna factory_credentials |
+| Locate físico (buzzer + mensagem na tela) | ✅ v2.2 — buzzer_buzz.fcgi + message_to_screen.fcgi |
 | Auto-update via GitHub Releases (electron-updater) | ✅ v2.1 (requer releases publicados) |
 | Network Config remoto (DHCP / IP fixo, modal) | ✅ v2.1 — via set_system_network.fcgi |
 | People management | ❌ Removido (via web) |
@@ -190,6 +191,21 @@ Construído sobre `controlid.catalog.ts` (26 módulos; agora bundlado também no
 - Métodos estendidos do adapter (getNetwork/setNetwork/commissionDevice/
   finishSetup/downloadLog) agora declarados como opcionais na interface
   `DeviceAdapter` (antes acessados via `as any` nos handlers).
+
+## v2.2 — Locate físico (buzzer + tela)
+
+Utilitário para achar o equipamento fisicamente (complementa o Locate por MAC).
+Botão "Locate (beep + screen)" no painel do device → `devices:locate-physical`:
+
+- **`buzzer_buzz.fcgi`** (`adapter.buzz`): `{frequency, duty_cycle, timeout}` —
+  timeout em ms, máx 3000 por chamada (a doc limita); o handler dá 3 beeps curtos.
+- **`message_to_screen.fcgi`** (`adapter.showMessage`): `{message, timeout}` —
+  timeout ms (0 = até limpar; string vazia limpa). Métodos opcionais na interface.
+
+Nota sobre o resto do item "utilitários físicos": **SNMP** na API é só flag de
+configuração (já coberto pelo editor de config, se o módulo existir no firmware);
+**GPIO ao vivo** não tem endpoint de leitura padronizado confiável na doc de
+acesso — não implementado.
 
 ## v2.1 — Bugs corrigidos
 

@@ -122,6 +122,41 @@ export class ControlIdAdapter implements DeviceAdapter {
   }
 
   /**
+   * Sound the device buzzer via POST /buzzer_buzz.fcgi.
+   * Params: frequency (Hz), duty_cycle (%), timeout (ms, device max 3000/call).
+   * Used to physically locate a device from the app.
+   */
+  async buzz(conn: DeviceConnection, opts: { frequency?: number; dutyCycle?: number; timeoutMs?: number } = {}): Promise<boolean> {
+    try {
+      const session = await this.login(conn);
+      const proto = conn.port === 443 ? 'https' : 'http';
+      const body = JSON.stringify({
+        frequency: opts.frequency ?? 4000,
+        duty_cycle: opts.dutyCycle ?? 50,
+        timeout: Math.min(3000, Math.max(1, opts.timeoutMs ?? 1000)),
+      });
+      await this.httpRequest(proto, conn.ip, conn.port, '/buzzer_buzz.fcgi', body, 10000, session);
+      await this.httpRequest(proto, conn.ip, conn.port, '/logout.fcgi', '{}', 5000, session).catch(() => {});
+      return true;
+    } catch { return false; }
+  }
+
+  /**
+   * Show a message on the device screen via POST /message_to_screen.fcgi.
+   * timeout in ms (0 = keep until cleared). An empty message clears it.
+   */
+  async showMessage(conn: DeviceConnection, message: string, timeoutMs = 5000): Promise<boolean> {
+    try {
+      const session = await this.login(conn);
+      const proto = conn.port === 443 ? 'https' : 'http';
+      await this.httpRequest(proto, conn.ip, conn.port, '/message_to_screen.fcgi',
+        JSON.stringify({ message, timeout: Math.max(0, timeoutMs) }), 10000, session);
+      await this.httpRequest(proto, conn.ip, conn.port, '/logout.fcgi', '{}', 5000, session).catch(() => {});
+      return true;
+    } catch { return false; }
+  }
+
+  /**
    * Read device configuration via get_configuration.fcgi.
    * The API requires an explicit list of module+field names; an empty body
    * returns {}. Reads module-by-module so an unsupported module on a given

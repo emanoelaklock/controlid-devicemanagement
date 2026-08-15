@@ -179,6 +179,34 @@ export function registerIpcHandlers(getWindow: () => BrowserWindow | null): void
     return adapter.openDoor(conn, doorId);
   });
 
+  // Physically locate a device: beep and/or flash a message on its screen.
+  ipcMain.handle('devices:locate-physical', async (_e, { id, buzz, message }: { id: string; buzz?: boolean; message?: string }) => {
+    const device = queryOne(`SELECT d.*, c.username, c.password as cred_password
+      FROM devices d LEFT JOIN credentials c ON d.credential_id = c.id WHERE d.id = ?`, [id]);
+    if (!device) throw new Error('Device not found');
+    const adapter = adapterRegistry.get(device.manufacturer) as any;
+    if (!adapter) throw new Error('No adapter');
+    const conn: DeviceConnection = { ip: device.ip_address, port: device.port,
+      username: device.username || 'admin', password: device.cred_password ? decrypt(device.cred_password) : '' };
+
+    const done: string[] = [];
+    if (message !== undefined && adapter.showMessage) {
+      if (await adapter.showMessage(conn, message, 10000)) done.push('message shown');
+    }
+    if (buzz && adapter.buzz) {
+      // Three short beeps so it's audible across a room.
+      for (let i = 0; i < 3; i++) {
+        await adapter.buzz(conn, { timeoutMs: 400 });
+        if (i < 2) await new Promise(r => setTimeout(r, 250));
+      }
+      done.push('buzzer sounded');
+    }
+    if (done.length === 0) throw new Error('This device does not support buzzer or screen messages');
+    run(`INSERT INTO audit_logs (id, action, category, device_id, device_name, details, severity, created_at) VALUES (?,?,?,?,?,?,?,?)`,
+      [uuid(), 'locate_physical', 'device', id, device.name, `Physical locate: ${done.join(', ')}`, 'info', nowLocal()]);
+    return { ok: true, done };
+  });
+
   ipcMain.handle('devices:set-time', async (_e, id: string) => {
     const device = queryOne(`SELECT d.*, c.username, c.password as cred_password
       FROM devices d LEFT JOIN credentials c ON d.credential_id = c.id WHERE d.id = ?`, [id]);

@@ -150,6 +150,12 @@ export interface DeviceAdapter {
   /** Open door / trigger relay */
   openDoor(connection: DeviceConnection, doorId?: number): Promise<boolean>;
 
+  /** Sound the device buzzer (physical locate) */
+  buzz?(connection: DeviceConnection, opts?: { frequency?: number; dutyCycle?: number; timeoutMs?: number }): Promise<boolean>;
+
+  /** Show a message on the device screen ('' clears it) */
+  showMessage?(connection: DeviceConnection, message: string, timeoutMs?: number): Promise<boolean>;
+
   /** Get device configuration as JSON */
   getConfig(connection: DeviceConnection): Promise<Record<string, unknown>>;
 
